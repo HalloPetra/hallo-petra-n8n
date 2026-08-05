@@ -34,7 +34,7 @@ Sendet die synchrone Antwort an HalloPetra — strukturiert in genau dem Format,
 }
 ```
 
-Im Node füllt man die Kontaktfelder, beliebige Key-Value-Paare („Other Data") und den Content (Text oder JSON) — Expressions funktionieren in allen Feldern. **End-Node ohne Ausgänge:** Hier endet der synchrone Teil des Workflows. Wer nach der Antwort noch weiterarbeiten will (z. B. Logging), zweigt vor dem Finish-Node in einen parallelen Ast ab — die Antwort geht raus, sobald der Finish-Node läuft.
+Im Node füllt man die Kontaktfelder, beliebige Key-Value-Paare („Other Data") und den Content (None/Text/JSON) — Expressions funktionieren in allen Feldern. **Alle Abschnitte sind optional:** Was nicht befüllt ist, taucht in der Response gar nicht auf (kein leeres Objekt, kein leerer String). **End-Node ohne Ausgänge:** Hier endet der synchrone Teil des Workflows. Wer nach der Antwort noch weiterarbeiten will (z. B. Logging), zweigt vor dem Finish-Node in einen parallelen Ast ab — die Antwort geht raus, sobald der Finish-Node läuft.
 
 ### Petra Events Trigger (Polling)
 

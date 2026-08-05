@@ -99,10 +99,15 @@ export class PetraFinish implements INodeType {
 				],
 			},
 			{
-				displayName: 'Content Type',
+				displayName: 'Content',
 				name: 'contentType',
 				type: 'options',
 				options: [
+					{
+						name: 'None',
+						value: 'none',
+						description: 'Send no content field at all',
+					},
 					{
 						name: 'Text',
 						value: 'text',
@@ -114,11 +119,12 @@ export class PetraFinish implements INodeType {
 						description: 'Content is a JSON structure',
 					},
 				],
-				default: 'text',
-				description: 'How the content for the Petra agent is provided',
+				default: 'none',
+				description:
+					'Content that ends up in the context of the Petra agent. With "None" the response contains no content field.',
 			},
 			{
-				displayName: 'Content',
+				displayName: 'Text',
 				name: 'content',
 				type: 'string',
 				typeOptions: {
@@ -133,7 +139,7 @@ export class PetraFinish implements INodeType {
 				description: 'Free-form content that ends up in the context of the Petra agent',
 			},
 			{
-				displayName: 'Content (JSON)',
+				displayName: 'JSON',
 				name: 'contentJson',
 				type: 'json',
 				displayOptions: {
@@ -199,29 +205,33 @@ export class PetraFinish implements INodeType {
 			if (key) otherData[key] = value;
 		}
 
+		// Only sections that actually contain data end up in the response
+		const body: IDataObject = {};
+		if (Object.keys(contact).length) {
+			body.contact = contact;
+		}
+		if (Object.keys(otherData).length) {
+			body.other_data = otherData;
+		}
+
 		const contentType = this.getNodeParameter('contentType', 0) as string;
-		let content: IDataObject | IDataObject[] | string;
 		if (contentType === 'json') {
 			const rawContent = this.getNodeParameter('contentJson', 0) as IDataObject | string;
-			content =
+			body.content =
 				typeof rawContent === 'string'
 					? jsonParse<IDataObject>(rawContent, {
 							errorMessage: 'Content (JSON) must be valid JSON',
 						})
 					: rawContent;
-		} else {
-			content = this.getNodeParameter('content', 0, '') as string;
+		} else if (contentType === 'text') {
+			body.content = this.getNodeParameter('content', 0, '') as string;
 		}
 
 		const options = this.getNodeParameter('options', 0, {}) as IDataObject;
 		const responseCode = (options.responseCode as number) ?? 200;
 
 		this.sendResponse({
-			body: {
-				contact,
-				other_data: otherData,
-				content,
-			},
+			body,
 			headers: { 'content-type': 'application/json' },
 			statusCode: responseCode,
 		});

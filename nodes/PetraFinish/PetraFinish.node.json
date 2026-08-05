@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-petra.petraFinish",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Communication"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://hallopetra.de"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://hallopetra.de"
+			}
+		]
+	}
+}

@@ -47,6 +47,7 @@ const server = http.createServer(async (req, res) => {
 			id: body.id ?? `evt_${state.nextSeq}`,
 			type: body.type ?? 'call.ended',
 			occurredAt: new Date().toISOString(),
+			attempt: 1,
 			payload: body.payload ?? { note: 'test event' },
 		};
 		state.events.push(event);
@@ -118,13 +119,22 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 204, {});
 		}
 	}
+	// Redeliver: Event erscheint erneut im Feed (neue Sequenznummer, attempt aus dem Request)
+	const redeliverMatch = path.match(/^\/events\/([^/]+)\/redeliver$/);
+	if (redeliverMatch && req.method === 'POST') {
+		const body = await readBody(req);
+		const original = [...state.events].reverse().find((e) => e.id === redeliverMatch[1]);
+		if (!original) return json(res, 404, { message: 'Unknown event' });
+		const redelivered = {
+			...original,
+			seq: state.nextSeq++,
+			attempt: body.attempt ?? (original.attempt ?? 1) + 1,
+		};
+		state.events.push(redelivered);
+		console.log(`  -> redeliver ${redelivered.id} as attempt ${redelivered.attempt}`);
+		return json(res, 201, { id: redelivered.id, attempt: redelivered.attempt });
+	}
 	if (path === '/events' && req.method === 'GET') {
-		const ids = url.searchParams.get('ids');
-		if (ids) {
-			const wanted = new Set(ids.split(','));
-			const events = state.events.filter((e) => wanted.has(e.id));
-			return json(res, 200, { events: events.map(({ seq, ...e }) => e) });
-		}
 		const after = Number(url.searchParams.get('after') ?? 0);
 		const limit = Number(url.searchParams.get('limit') ?? 50);
 		const types = url.searchParams.get('types');

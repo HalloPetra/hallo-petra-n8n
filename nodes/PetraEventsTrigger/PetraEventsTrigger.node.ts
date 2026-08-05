@@ -9,23 +9,15 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
 
-import {
-	chunk,
-	getPetraEventsState,
-	loadPetraTypes,
-	petraApiRequest,
-	type PetraEvent,
-} from '../shared/GenericFunctions';
+import { loadPetraTypes, petraApiRequest, type PetraEvent } from '../shared/GenericFunctions';
 
-const RETRY_FETCH_CHUNK_SIZE = 50;
-
-function toItem(event: PetraEvent, attempt: number): INodeExecutionData {
+function toItem(event: PetraEvent): INodeExecutionData {
 	return {
 		json: {
 			...event,
 			_petra: {
 				eventId: event.id,
-				attempt,
+				attempt: event.attempt ?? 1,
 			},
 		} as unknown as IDataObject,
 	};
@@ -42,7 +34,7 @@ export class PetraEventsTrigger implements INodeType {
 		usableAsTool: true,
 		subtitle: '={{$parameter["eventTypes"].length ? $parameter["eventTypes"].join(", ") : "all events"}}',
 		description:
-			'Starts the workflow for new HalloPetra events (e.g. finished calls). Polls the HalloPetra event feed and re-delivers events that a "Petra Event Retry" node marked as failed.',
+			'Starts the workflow for new HalloPetra events (e.g. finished calls). Polls the HalloPetra event feed; events that a "Petra Event Retry" node marked as failed are redelivered through the feed.',
 		defaults: {
 			name: 'Petra Events Trigger',
 		},
@@ -97,7 +89,7 @@ export class PetraEventsTrigger implements INodeType {
 		}
 
 		// In manual mode ("Fetch Test Event") static data is not persisted, so poll
-		// the latest events without touching cursor or retry state.
+		// the latest events without touching the cursor.
 		if (this.getMode() === 'manual') {
 			const response = await petraApiRequest.call(this, 'GET', '/events', undefined, {
 				...feedQuery,
@@ -107,60 +99,27 @@ export class PetraEventsTrigger implements INodeType {
 			if (!events.length) {
 				return null;
 			}
-			return [events.map((event) => toItem(event, 1))];
+			return [events.map(toItem)];
 		}
 
-		const state = getPetraEventsState(this.getWorkflowStaticData('global'));
-		const retrySet = state.retry ?? {};
-		const retryIds = Object.keys(retrySet);
-
-		// Re-fetch events that a Petra Event Retry node marked as failed
-		const retryEvents: PetraEvent[] = [];
-		for (const ids of chunk(retryIds, RETRY_FETCH_CHUNK_SIZE)) {
-			const response = await petraApiRequest.call(this, 'GET', '/events', undefined, {
-				ids: ids.join(','),
-			});
-			retryEvents.push(...((response.events ?? []) as PetraEvent[]));
+		// The cursor is the only client-side state and is written exclusively by
+		// this poll function (single writer). Retries do not touch it: the Petra
+		// Event Retry node asks the API to redeliver, so failed events simply
+		// reappear in the feed behind the cursor.
+		const staticData = this.getWorkflowStaticData('node');
+		if (staticData.cursor) {
+			feedQuery.after = staticData.cursor;
 		}
 
-		if (state.cursor) {
-			feedQuery.after = state.cursor;
-		}
-		const feedResponse = await petraApiRequest.call(this, 'GET', '/events', undefined, feedQuery);
-		const feedEvents = (feedResponse.events ?? []) as PetraEvent[];
-		if (feedResponse.nextCursor) {
-			state.cursor = feedResponse.nextCursor as string;
+		const response = await petraApiRequest.call(this, 'GET', '/events', undefined, feedQuery);
+		const events = (response.events ?? []) as PetraEvent[];
+		if (response.nextCursor) {
+			staticData.cursor = response.nextCursor as string;
 		}
 
-		const items: INodeExecutionData[] = [];
-		const emittedIds = new Set<string>();
-		for (const event of retryEvents) {
-			const attempt = (retrySet[event.id]?.attempts ?? 0) + 1;
-			items.push(toItem(event, attempt));
-			emittedIds.add(event.id);
-		}
-		for (const event of feedEvents) {
-			if (emittedIds.has(event.id)) {
-				continue;
-			}
-			items.push(toItem(event, 1));
-			emittedIds.add(event.id);
-		}
-
-		// All retry entries were either emitted again or could not be fetched anymore
-		// (e.g. past retention) — clear them so the set cannot grow without bounds.
-		// The retry node re-adds any event that fails again.
-		for (const id of retryIds) {
-			if (!emittedIds.has(id)) {
-				this.logger.warn(`Petra event ${id} is no longer available in the feed, dropping retry`);
-			}
-			delete retrySet[id];
-		}
-		state.retry = retrySet;
-
-		if (!items.length) {
+		if (!events.length) {
 			return null;
 		}
-		return [items];
+		return [events.map(toItem)];
 	}
 }

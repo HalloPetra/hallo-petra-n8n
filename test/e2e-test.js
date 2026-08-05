@@ -226,6 +226,7 @@ async function phase2() {
 					typeVersion: 1,
 					position: [600, 200],
 					parameters: { maxAttempts: 3 },
+					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
 				},
 				{
 					id: crypto.randomUUID(),
@@ -287,21 +288,29 @@ async function phase3() {
 		startedAt: e.startedAt,
 	}));
 	console.log('Executions Workflow B:', JSON.stringify(results, null, 2));
-	check('Mindestens 2 Executions (Erst-Zustellung + Retry-Poll)', results.length >= 2);
+	check('Mindestens 3 Executions (Erst-Zustellung + 2 Redeliveries)', results.length >= 3);
 	check('Executions erfolgreich (Fehler wurde im Error-Pfad abgefangen)', results.every((e) => e.status === 'success'), JSON.stringify(results.map((e) => e.status)));
 
-	// Static Data des Workflows ansehen
+	// Static Data des Workflows ansehen (nur noch der Cursor, single writer = Poller)
 	const workflowB = await api('GET', `/rest/workflows/${state.workflowBId}`);
 	const staticData = (workflowB.data ?? workflowB).staticData;
 	console.log('Static Data Workflow B:', JSON.stringify(staticData));
 
-	// Mock-Log: wurde evt_fail per ?ids= nachgeladen?
+	// Mock-Log: Redeliver-Calls des Retry-Nodes
 	const mockState = await mock('GET', '/_test/state');
-	const idFetches = mockState.requestLog.filter((r) => r.url.includes('ids='));
-	console.log('Retry-Fetches (?ids=):', JSON.stringify(idFetches, null, 2));
-	check('Fehlgeschlagenes Event wurde per ?ids= nachgeladen', idFetches.some((r) => r.url.includes('evt_fail')));
+	const redelivers = mockState.requestLog.filter((r) => r.url.includes('/redeliver'));
+	console.log('Redeliver-Calls:', JSON.stringify(redelivers.map((r) => r.url)));
+	// maxAttempts=3: Zustellung 1 und 2 schlagen fehl und werden redelivered (attempt 2, 3),
+	// nach Fehlschlag von attempt 3 greift der Cap -> Given Up, kein weiterer Redeliver.
+	check(
+		'Fehlgeschlagenes Event wurde redelivered (genau 2x wegen maxAttempts=3)',
+		redelivers.length === 2,
+		`${redelivers.length} Redeliver-Calls`,
+	);
 	const cursorFetches = mockState.requestLog.filter((r) => r.url.includes('after='));
-	check('Cursor wird fortgeschrieben (after=-Parameter in Feed-Polls)', cursorFetches.length >= 1, cursorFetches.map((r) => r.url).join(' | '));
+	check('Cursor wird fortgeschrieben (after=-Parameter in Feed-Polls)', cursorFetches.length >= 1, cursorFetches.map((r) => r.url).slice(-3).join(' | '));
+	const feedAttempts = mockState.events.filter((e) => e.id === 'evt_fail').map((e) => e.attempt);
+	check('Feed enthält evt_fail mit attempt 1, 2, 3', JSON.stringify(feedAttempts) === '[1,2,3]', JSON.stringify(feedAttempts));
 }
 
 const phase = process.argv[2];

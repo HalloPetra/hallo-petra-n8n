@@ -27,36 +27,9 @@ export interface PetraEvent {
 	id: string;
 	type: string;
 	occurredAt: string;
+	/** Delivery attempt, starts at 1; incremented by the redeliver endpoint */
+	attempt?: number;
 	payload: IDataObject;
-}
-
-export interface PetraRetryEntry {
-	attempts: number;
-	firstSeen: string;
-}
-
-export interface PetraEventsState {
-	cursor?: string;
-	retry?: Record<string, PetraRetryEntry>;
-}
-
-// Key inside the workflow's global static data. Global scope (not 'node') because
-// the events trigger and the retry node must share this state.
-const EVENTS_STATE_KEY = 'petraEvents';
-
-export function getPetraEventsState(staticData: IDataObject): PetraEventsState {
-	if (typeof staticData[EVENTS_STATE_KEY] !== 'object' || staticData[EVENTS_STATE_KEY] === null) {
-		staticData[EVENTS_STATE_KEY] = {};
-	}
-	return staticData[EVENTS_STATE_KEY] as PetraEventsState;
-}
-
-export function chunk<T>(items: T[], size: number): T[][] {
-	const chunks: T[][] = [];
-	for (let i = 0; i < items.length; i += size) {
-		chunks.push(items.slice(i, i + size));
-	}
-	return chunks;
 }
 
 export async function petraApiRequest(

@@ -6,7 +6,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-import { getPetraEventsState } from '../shared/GenericFunctions';
+import { petraApiRequest } from '../shared/GenericFunctions';
 
 export class PetraEventRetry implements INodeType {
 	description: INodeTypeDescription = {
@@ -18,13 +18,19 @@ export class PetraEventRetry implements INodeType {
 		usableAsTool: true,
 		subtitle: '=max. {{$parameter["maxAttempts"]}} attempts',
 		description:
-			'Marks a HalloPetra event as failed so the Petra Events trigger delivers it again on the next poll. Connect this node to the error path of your workflow. Retries only work in active (production) workflows — the marking must be persisted, so the execution has to finish successfully after this node ran.',
+			'Asks HalloPetra to redeliver an event through the feed so the Petra Events trigger picks it up again on a later poll. Connect this node to the error path of your workflow.',
 		defaults: {
 			name: 'Petra Event Retry',
 		},
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main, NodeConnectionTypes.Main],
 		outputNames: ['Retry Scheduled', 'Given Up'],
+		credentials: [
+			{
+				name: 'petraApi',
+				required: true,
+			},
+		],
 		properties: [
 			{
 				displayName: 'Event ID',
@@ -44,18 +50,13 @@ export class PetraEventRetry implements INodeType {
 				},
 				default: 5,
 				description:
-					'Maximum number of delivery attempts per event, including the first one. Events whose failed attempt already reached this number go to the "Given Up" output instead of being retried.',
+					'Maximum number of delivery attempts per event, including the first one. Events whose failed attempt already reached this number go to the "Given Up" output instead of being redelivered.',
 			},
 		],
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
-		const state = getPetraEventsState(this.getWorkflowStaticData('global'));
-		if (state.retry === undefined) {
-			state.retry = {};
-		}
-		const retrySet = state.retry;
 
 		const retryScheduled: INodeExecutionData[] = [];
 		const givenUp: INodeExecutionData[] = [];
@@ -86,10 +87,9 @@ export class PetraEventRetry implements INodeType {
 				continue;
 			}
 
-			retrySet[eventId] = {
-				attempts: attempt,
-				firstSeen: retrySet[eventId]?.firstSeen ?? new Date().toISOString(),
-			};
+			await petraApiRequest.call(this, 'POST', `/events/${eventId}/redeliver`, {
+				attempt: attempt + 1,
+			});
 			retryScheduled.push({ json: item.json, pairedItem: itemIndex });
 		}
 

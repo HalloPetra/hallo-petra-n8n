@@ -157,10 +157,25 @@ export class PetraTrigger implements INodeType {
 				const webhookUrl = this.getNodeWebhookUrl('default');
 				const hookType = this.getNodeParameter('hookType') as string;
 
-				const response = await petraApiRequest.call(this, 'POST', '/webhooks', {
-					event: hookType,
-					url: webhookUrl,
-				});
+				let response;
+				try {
+					response = await petraApiRequest.call(this, 'POST', '/webhooks', {
+						event: hookType,
+						url: webhookUrl,
+					});
+				} catch (error) {
+					const httpCode = (error as { httpCode?: string }).httpCode;
+					throw new NodeOperationError(
+						this.getNode(),
+						`Could not register the webhook with HalloPetra (POST /webhooks failed${httpCode ? ` with status ${httpCode}` : ''})`,
+						{
+							description:
+								httpCode === '404'
+									? 'The HalloPetra API at the configured base URL has no webhook registration endpoint (yet). Check that the credential points to an environment that supports webhook registration.'
+									: 'Check the API key and base URL in the Petra API credential.',
+						},
+					);
+				}
 
 				if (!response.id) {
 					throw new NodeOperationError(

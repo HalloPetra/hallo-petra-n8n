@@ -73,6 +73,29 @@ npm run lint                     # Linting mit den n8n-Community-Node-Regeln
 
 `npm run dev` startet eine lokale n8n-Instanz (standardmäßig unter http://localhost:5678), in der die Nodes aus diesem Package direkt verfügbar sind und bei Änderungen neu geladen werden.
 
+### E2E-Test mit Docker (OrbStack)
+
+Unter `test/` liegt ein E2E-Setup, das das Package als echtes Community-Package in einem n8n-Docker-Container testet:
+
+```bash
+npm run build && npm pack --pack-destination /tmp        # Tarball bauen
+node test/mock-petra-api.js &                            # Mock-Petra-API auf Port 7788
+
+# n8n-Container: Package installieren, dann starten
+DATA=$(mktemp -d) && chmod 777 "$DATA"
+docker run --rm -v "$DATA:/home/node/.n8n" -v /tmp/n8n-nodes-petra-0.1.0.tgz:/tmp/petra.tgz \
+  --entrypoint sh n8nio/n8n:latest -c "mkdir -p /home/node/.n8n/nodes && cd /home/node/.n8n/nodes && npm install /tmp/petra.tgz"
+docker run -d --name n8n-petra -p 5678:5678 -v "$DATA:/home/node/.n8n" \
+  -e N8N_SECURE_COOKIE=false n8nio/n8n:latest
+
+node test/e2e-test.js phase1   # Owner-Setup, Credential, Sync-Webhook-Roundtrip inkl. Signaturprüfung
+node test/e2e-test.js phase2   # Events-Workflow mit Fehlerpfad + Petra Event Retry aktivieren
+sleep 150
+node test/e2e-test.js phase3   # Retry-Zustellung, Cursor-Fortschritt und Executions prüfen
+```
+
+Die Mock-API erwartet den API-Key `test-key`; aus dem Container heraus ist sie über `http://host.docker.internal:7788` erreichbar (im Credential vorkonfiguriert durch das Testskript).
+
 ## Neuen Node hinzufügen
 
 1. Ordner unter `nodes/<NodeName>/` anlegen mit `<NodeName>.node.ts`.

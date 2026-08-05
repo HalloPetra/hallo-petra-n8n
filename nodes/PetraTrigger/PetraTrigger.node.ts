@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import type {
+	IDataObject,
 	IHookFunctions,
 	ILoadOptionsFunctions,
 	INodePropertyOptions,
@@ -55,6 +56,27 @@ export class PetraTrigger implements INodeType {
 				default: '',
 				description:
 					'Which synchronous HalloPetra hook this workflow handles, e.g. "call.incoming". Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			},
+			{
+				displayName: 'Registration',
+				name: 'registration',
+				type: 'options',
+				options: [
+					{
+						name: 'Automatic (via HalloPetra API)',
+						value: 'automatic',
+						description:
+							'Register the webhook automatically with HalloPetra when the workflow is published. Incoming calls are verified via HMAC signature.',
+					},
+					{
+						name: 'Manual (Copy URL to HalloPetra)',
+						value: 'manual',
+						description:
+							'Do not call the HalloPetra API. Copy the production webhook URL from this trigger and configure it in the HalloPetra app yourself. Incoming calls are not signature-checked.',
+					},
+				],
+				default: 'automatic',
+				description: 'How the webhook becomes known to HalloPetra',
 			},
 			{
 				displayName: 'Respond',
@@ -123,6 +145,9 @@ export class PetraTrigger implements INodeType {
 	webhookMethods = {
 		default: {
 			async checkExists(this: IHookFunctions): Promise<boolean> {
+				if ((this.getNodeParameter('registration', 'automatic') as string) === 'manual') {
+					return true;
+				}
 				const staticData = this.getWorkflowStaticData('node');
 				if (!staticData.webhookId) {
 					return false;
@@ -131,16 +156,21 @@ export class PetraTrigger implements INodeType {
 				const webhookUrl = this.getNodeWebhookUrl('default');
 				const hookType = this.getNodeParameter('hookType') as string;
 				try {
-					const webhook = await petraApiRequest.call(
+					const response = await petraApiRequest.call(
 						this,
 						'GET',
-						`/webhooks/${staticData.webhookId}`,
+						`/webhook-subscriptions/${staticData.webhookId}`,
 					);
-					if (webhook.url === webhookUrl && webhook.event === hookType) {
+					const subscription = (response.subscription ?? response) as IDataObject;
+					if (subscription.url === webhookUrl && subscription.event === hookType) {
 						return true;
 					}
 					// URL or hook type changed since registration — re-register from scratch
-					await petraApiRequest.call(this, 'DELETE', `/webhooks/${staticData.webhookId}`);
+					await petraApiRequest.call(
+						this,
+						'DELETE',
+						`/webhook-subscriptions/${staticData.webhookId}`,
+					);
 				} catch (error) {
 					// Webhook is unknown to HalloPetra (deleted remotely or never created)
 					this.logger.warn(
@@ -154,20 +184,25 @@ export class PetraTrigger implements INodeType {
 			},
 
 			async create(this: IHookFunctions): Promise<boolean> {
+				if ((this.getNodeParameter('registration', 'automatic') as string) === 'manual') {
+					// The user configures the webhook URL in the HalloPetra app themselves
+					return true;
+				}
 				const webhookUrl = this.getNodeWebhookUrl('default');
 				const hookType = this.getNodeParameter('hookType') as string;
 
 				let response;
 				try {
-					response = await petraApiRequest.call(this, 'POST', '/webhooks', {
+					response = await petraApiRequest.call(this, 'POST', '/webhook-subscriptions', {
 						event: hookType,
 						url: webhookUrl,
+						description: 'Registered by n8n (n8n-nodes-petra)',
 					});
 				} catch (error) {
 					const httpCode = (error as { httpCode?: string }).httpCode;
 					throw new NodeOperationError(
 						this.getNode(),
-						`Could not register the webhook with HalloPetra (POST /webhooks failed${httpCode ? ` with status ${httpCode}` : ''})`,
+						`Could not register the webhook with HalloPetra (POST /webhook-subscriptions failed${httpCode ? ` with status ${httpCode}` : ''})`,
 						{
 							description:
 								httpCode === '404'
@@ -177,24 +212,32 @@ export class PetraTrigger implements INodeType {
 					);
 				}
 
-				if (!response.id) {
+				const subscription = (response.subscription ?? {}) as IDataObject;
+				if (!subscription.id) {
 					throw new NodeOperationError(
 						this.getNode(),
-						'The HalloPetra API did not return a webhook ID',
+						'The HalloPetra API did not return a subscription ID',
 					);
 				}
 
 				const staticData = this.getWorkflowStaticData('node');
-				staticData.webhookId = response.id;
+				staticData.webhookId = subscription.id;
 				staticData.webhookSecret = response.secret;
 				return true;
 			},
 
 			async delete(this: IHookFunctions): Promise<boolean> {
+				if ((this.getNodeParameter('registration', 'automatic') as string) === 'manual') {
+					return true;
+				}
 				const staticData = this.getWorkflowStaticData('node');
 				if (staticData.webhookId) {
 					try {
-						await petraApiRequest.call(this, 'DELETE', `/webhooks/${staticData.webhookId}`);
+						await petraApiRequest.call(
+							this,
+							'DELETE',
+							`/webhook-subscriptions/${staticData.webhookId}`,
+						);
 					} catch (error) {
 						// Do not block deactivation — the registration may already be gone remotely
 						this.logger.warn(
@@ -213,19 +256,29 @@ export class PetraTrigger implements INodeType {
 		const staticData = this.getWorkflowStaticData('node');
 		const secret = staticData.webhookSecret as string | undefined;
 
+		// HalloPetra signs deliveries Stripe-style: `t=<unixSeconds>,v1=<hex HMAC-SHA256 of "<t>.<rawBody>">`.
+		// Only verified when a secret exists, i.e. the webhook was registered via the API.
 		if (secret) {
-			const headers = this.getHeaderData();
-			const signature = headers['x-petra-signature'] as string | undefined;
-			const rawBody =
+			const header = (this.getHeaderData()['x-hallopetra-signature'] as string | undefined) ?? '';
+			const rawBody = (
 				(this.getRequestObject() as unknown as { rawBody?: Buffer }).rawBody ??
-				Buffer.from(JSON.stringify(this.getBodyData()));
-			const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+				Buffer.from(JSON.stringify(this.getBodyData()))
+			).toString('utf8');
 
-			const signatureBuffer = Buffer.from(signature ?? '', 'utf8');
-			const expectedBuffer = Buffer.from(expected, 'utf8');
-			const isValid =
-				signatureBuffer.length === expectedBuffer.length &&
-				timingSafeEqual(signatureBuffer, expectedBuffer);
+			let isValid = false;
+			const match = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(header);
+			if (match) {
+				const timestamp = Number.parseInt(match[1], 10);
+				const toleranceSeconds = 300;
+				if (Math.abs(Date.now() / 1000 - timestamp) <= toleranceSeconds) {
+					const expected = Buffer.from(
+						createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex'),
+						'utf8',
+					);
+					const provided = Buffer.from(match[2], 'utf8');
+					isValid = expected.length === provided.length && timingSafeEqual(expected, provided);
+				}
+			}
 
 			if (!isValid) {
 				const response = this.getResponseObject();

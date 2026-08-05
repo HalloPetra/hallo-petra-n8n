@@ -68,20 +68,23 @@ Gehört in den **Fehlerpfad** des Workflows (Error-Output eines Nodes bzw. „Co
 
 Base-URL: `https://api.hallopetra.de/v1` (Preview z. B. `https://hp-api-pr-<n>.vercel.app/v1`). Alle Requests: `Authorization: Bearer <API-Key>`, User-Agent `n8n-nodes-petra/<version>`.
 
-**Bereits vorhanden** (auch von der Make-Integration genutzt):
+**Bereits vorhanden** (implementiert in `hallopetra/apps/api`, Mount `/v1`; auch von der Make-Integration genutzt):
 
 | Endpunkt | Zweck |
 | --- | --- |
 | `GET /events/types` | Einheitliche Typ-Liste: `{ types: [{ name, mode: "sync"\|"async", description? }] }`. `sync`-Typen (z. B. `call.incoming`) bedient der Webhook-Trigger, `async`-Typen (z. B. `call.finished`) der Events-Trigger. Dient auch als Auth-Check für den Credential-Test. |
-| `GET /events?after=<cursor>&limit=<n>&types=<a,b>` | Feed: `{ events: [{ id, type, occurredAt, payload }], nextCursor }` — Cursor monoton, `after`-Parameter und `types`-Filter verifiziert |
+| `POST /webhook-subscriptions` | `{ url, event, description? }` → `201 { subscription: { id, url, event, active, createdAt }, secret }` — das Secret erscheint nur hier |
+| `GET/DELETE /webhook-subscriptions/{id}` | Registrierung prüfen bzw. löschen (`DELETE` → `{ deleted, id }`) |
+| `POST /webhook-subscriptions/{id}/test` | Signierte Beispiel-Zustellung an die registrierte URL → `{ ok, status?, durationMs }` — praktischer E2E-Check |
+| `GET /events?after=<cursor>&limit=<n>&types=<a,b>` | Feed: `{ events: [{ id, type, occurredAt, payload }], nextCursor }` — `after` exklusiv, `limit` max 100; nur `async`-Events, Retention 30 Tage |
+| `GET /events?ids=1,2` | Re-Fetch bekannter Events (max 100) |
 
-**Noch zu bauen** (Spezifikation für das Backend-Team):
+**Signatur eingehender Webhook-Calls:** Header `X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex>` — HMAC-SHA256 über `"<t>.<rawBody>"` mit dem `secret` der Subscription, Toleranz ±300 s (Stripe-Schema). Der Trigger prüft sie automatisch, wenn per API registriert wurde; im „Manual"-Registrierungsmodus entfällt die Prüfung.
+
+**Noch zu bauen** (Spezifikation für das Backend-Team, für die Retry-Mechanik des Events-Triggers):
 
 | Endpunkt | Zweck |
 | --- | --- |
-| `POST /webhooks` | Webhook registrieren: Body `{ event, url }` → `{ id, secret }`; mit `secret` signiert HalloPetra eingehende Calls (HMAC-SHA256 des Raw-Body, Header `X-Petra-Signature`, hex) |
-| `GET /webhooks/{id}` | Registrierung prüfen → `{ id, event, url }` |
-| `DELETE /webhooks/{id}` | Webhook deregistrieren |
 | `POST /events/{id}/redeliver` | Body `{ attempt, delaySeconds }`: Event nach `delaySeconds` erneut in den Feed einreihen (neue Sequenznummer erst bei Sichtbarkeit vergeben, damit der Cursor monoton bleibt); Events tragen dann ein `attempt`-Feld (Default 1) — Grundlage der Retry-Mechanik mit Backoff |
 | `POST /events/{id}/failed` | Body `{ attempts, reason? }`: Event ist endgültig gescheitert (Max Attempts erreicht) — dem Betrieb in der HalloPetra-App anzeigen |
 

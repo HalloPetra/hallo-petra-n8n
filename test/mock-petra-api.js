@@ -71,17 +71,20 @@ const server = http.createServer(async (req, res) => {
 		return json(res, 200, state);
 	}
 	// Helfer: signierten Call an einen registrierten Webhook schicken
+	// (Signatur wie die echte API: X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex HMAC über "<t>.<rawBody>">)
 	if (path === '/_test/call-webhook' && req.method === 'POST') {
 		const body = await readBody(req);
 		const webhook = Object.values(state.webhooks).find((w) => w.event === (body.event ?? 'call.incoming'));
 		if (!webhook) return json(res, 404, { message: 'no webhook registered' });
 		const payload = JSON.stringify(body.payload ?? { caller: '+491701234567', callId: 'call_1' });
-		const signature = crypto.createHmac('sha256', webhook.secret).update(payload).digest('hex');
+		const t = Math.floor(Date.now() / 1000);
+		const hmac = crypto.createHmac('sha256', webhook.secret).update(`${t}.${payload}`).digest('hex');
+		const signature = body.badSignature ? `t=${t},v1=${'f'.repeat(64)}` : `t=${t},v1=${hmac}`;
 		const start = Date.now();
 		try {
 			const response = await fetch(webhook.url, {
 				method: 'POST',
-				headers: { 'content-type': 'application/json', 'x-petra-signature': body.badSignature ? 'ffff' : signature },
+				headers: { 'content-type': 'application/json', 'x-hallopetra-signature': signature },
 				body: payload,
 			});
 			const text = await response.text();
@@ -105,25 +108,30 @@ const server = http.createServer(async (req, res) => {
 			],
 		});
 	}
-	if (path === '/webhooks' && req.method === 'POST') {
+	if (path === '/webhook-subscriptions' && req.method === 'POST') {
 		const body = await readBody(req);
-		const id = `wh_${state.nextWebhookId++}`;
+		const id = `sub_${state.nextWebhookId++}`;
 		const secret = crypto.randomBytes(16).toString('hex');
 		state.webhooks[id] = { id, event: body.event, url: body.url, secret };
-		console.log(`  -> registered webhook ${id} for ${body.event}: ${body.url}`);
-		return json(res, 201, { id, secret });
+		console.log(`  -> registered subscription ${id} for ${body.event}: ${body.url}`);
+		return json(res, 201, {
+			subscription: { id, event: body.event, url: body.url, active: true, createdAt: new Date().toISOString() },
+			secret,
+		});
 	}
-	const webhookMatch = path.match(/^\/webhooks\/([^/]+)$/);
+	const webhookMatch = path.match(/^\/webhook-subscriptions\/([^/]+)$/);
 	if (webhookMatch) {
 		const webhook = state.webhooks[webhookMatch[1]];
 		if (!webhook) return json(res, 404, { message: 'Not found' });
 		if (req.method === 'GET') {
-			return json(res, 200, { id: webhook.id, event: webhook.event, url: webhook.url });
+			return json(res, 200, {
+				subscription: { id: webhook.id, event: webhook.event, url: webhook.url, active: true },
+			});
 		}
 		if (req.method === 'DELETE') {
 			delete state.webhooks[webhook.id];
-			console.log(`  -> deregistered webhook ${webhook.id}`);
-			return json(res, 204, {});
+			console.log(`  -> deregistered subscription ${webhook.id}`);
+			return json(res, 200, { deleted: true, id: webhook.id });
 		}
 	}
 	// Redeliver: Event erscheint nach delaySeconds erneut im Feed

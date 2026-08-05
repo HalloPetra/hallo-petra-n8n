@@ -99,6 +99,102 @@ export class PetraFinish implements INodeType {
 				],
 			},
 			{
+				displayName: 'Persist Fields (Kontakt)',
+				name: 'fieldsKontakt',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: true,
+				},
+				placeholder: 'Add field',
+				default: {},
+				description:
+					'Key-value fields that HalloPetra persists on the contact (fields.kontakt in the response)',
+				options: [
+					{
+						displayName: 'Field',
+						name: 'values',
+						values: [
+							{
+								displayName: 'Key',
+								name: 'key',
+								type: 'string',
+								default: '',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+							},
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Persist Fields (Prozess)',
+				name: 'fieldsProzess',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: true,
+				},
+				placeholder: 'Add field',
+				default: {},
+				description:
+					'Key-value fields that HalloPetra persists on the process (fields.prozess in the response)',
+				options: [
+					{
+						displayName: 'Field',
+						name: 'values',
+						values: [
+							{
+								displayName: 'Key',
+								name: 'key',
+								type: 'string',
+								default: '',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+							},
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Persist Fields (Projekt)',
+				name: 'fieldsProjekt',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: true,
+				},
+				placeholder: 'Add field',
+				default: {},
+				description:
+					'Key-value fields that HalloPetra persists on the project (fields.projekt in the response)',
+				options: [
+					{
+						displayName: 'Field',
+						name: 'values',
+						values: [
+							{
+								displayName: 'Key',
+								name: 'key',
+								type: 'string',
+								default: '',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+							},
+						],
+					},
+				],
+			},
+			{
 				displayName: 'Content',
 				name: 'contentType',
 				type: 'options',
@@ -212,6 +308,29 @@ export class PetraFinish implements INodeType {
 		}
 		if (Object.keys(otherData).length) {
 			body.other_data = otherData;
+		}
+
+		// fields envelope: values HalloPetra persists on Kontakt/Prozess/Projekt
+		const fields: IDataObject = {};
+		for (const [parameter, key] of [
+			['fieldsKontakt', 'kontakt'],
+			['fieldsProzess', 'prozess'],
+			['fieldsProjekt', 'projekt'],
+		] as const) {
+			const entries = this.getNodeParameter(`${parameter}.values`, 0, []) as Array<{
+				key: string;
+				value: string;
+			}>;
+			const section: IDataObject = {};
+			for (const { key: entryKey, value } of entries) {
+				if (entryKey) section[entryKey] = value;
+			}
+			if (Object.keys(section).length) {
+				fields[key] = section;
+			}
+		}
+		if (Object.keys(fields).length) {
+			body.fields = fields;
 		}
 
 		const contentType = this.getNodeParameter('contentType', 0) as string;

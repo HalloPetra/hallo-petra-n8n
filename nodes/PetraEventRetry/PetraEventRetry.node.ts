@@ -10,7 +10,7 @@ import { petraApiRequest } from '../shared/GenericFunctions';
 
 export class PetraEventRetry implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Petra Event Retry',
+		displayName: 'Petra Retry on Next Poll',
 		name: 'petraEventRetry',
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['transform'],
@@ -18,9 +18,9 @@ export class PetraEventRetry implements INodeType {
 		usableAsTool: true,
 		subtitle: '=max. {{$parameter["maxAttempts"]}} attempts',
 		description:
-			'Asks HalloPetra to redeliver an event through the feed so the Petra Events trigger picks it up again on a later poll. Connect this node to the error path of your workflow.',
+			'Marks a HalloPetra event for redelivery, so the Petra Events trigger picks it up again on the next poll. Connect this node to the error path of your workflow; its outputs are optional and only needed for custom dead-letter handling.',
 		defaults: {
-			name: 'Petra Event Retry',
+			name: 'Petra Retry on Next Poll',
 		},
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main, NodeConnectionTypes.Main],

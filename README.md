@@ -25,9 +25,9 @@ Sendet die synchrone HTTP-Antwort an HalloPetra zurück — mit dem ersten Input
 
 Pollt den HalloPetra-Event-Feed (minimal jede Minute) und startet den Workflow mit einem Batch neuer Events. Jedes Item enthält unter `_petra` Metadaten (`eventId`, `attempt`), die der Retry-Node nutzt.
 
-**Semantik: Default = erledigt.** Ein Event gilt als verarbeitet, sobald es zugestellt wurde — außer ein **Petra Event Retry**-Node fordert die erneute Zustellung an. Der einzige Client-Zustand ist der Feed-Cursor (Workflow Static Data, geschrieben ausschließlich vom Poller).
+**Semantik: Default = erledigt.** Ein Event gilt als verarbeitet, sobald es zugestellt wurde — außer ein **Petra Retry on Next Poll**-Node fordert die erneute Zustellung an. Der einzige Client-Zustand ist der Feed-Cursor (Workflow Static Data, geschrieben ausschließlich vom Poller).
 
-### Petra Event Retry
+### Petra Retry on Next Poll
 
 Gehört in den **Fehlerpfad** des Workflows (Error-Output eines Nodes bzw. „Continue (using error output)"). Ruft `POST /events/{id}/redeliver` auf — das Event erscheint daraufhin **erneut im Feed** (hinter dem Cursor, mit hochgezähltem `attempt`) und wird beim nächsten Poll wieder zugestellt. Ab „Max Attempts" (Default 5) wird nicht mehr redelivered; das Item wandert in den Output „Given Up" (dahinter lässt sich Dead-Letter-Handling bauen).
 
@@ -90,7 +90,7 @@ docker run -d --name n8n-petra -p 5678:5678 -v "$DATA:/home/node/.n8n" \
   -e N8N_SECURE_COOKIE=false n8nio/n8n:latest
 
 node test/e2e-test.js phase1   # Owner-Setup, Credential, Sync-Webhook-Roundtrip inkl. Signaturprüfung
-node test/e2e-test.js phase2   # Events-Workflow mit Fehlerpfad + Petra Event Retry aktivieren
+node test/e2e-test.js phase2   # Events-Workflow mit Fehlerpfad + Retry-Node aktivieren
 sleep 150
 node test/e2e-test.js phase3   # Retry-Zustellung, Cursor-Fortschritt und Executions prüfen
 ```

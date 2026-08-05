@@ -34,7 +34,7 @@ export class PetraEventsTrigger implements INodeType {
 		usableAsTool: true,
 		subtitle: '={{$parameter["eventTypes"].length ? $parameter["eventTypes"].join(", ") : "all events"}}',
 		description:
-			'Starts the workflow for new HalloPetra events (e.g. finished calls). Polls the HalloPetra event feed; events that a "Petra Event Retry" node marked as failed are redelivered through the feed.',
+			'Starts the workflow for new HalloPetra events (e.g. finished calls). Polls the HalloPetra event feed; events that a "Petra Retry on Next Poll" node marked as failed are redelivered through the feed.',
 		defaults: {
 			name: 'Petra Events Trigger',
 		},

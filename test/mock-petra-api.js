@@ -9,11 +9,25 @@ const API_KEY = 'test-key';
 
 const state = {
 	webhooks: {}, // id -> { id, event, url, secret }
-	events: [], // { seq, id, type, occurredAt, payload }
+	events: [], // { seq, id, type, occurredAt, attempt, payload }
+	scheduled: [], // Redeliveries, die erst nach dueAt in den Feed wandern
+	redeliverLog: [], // { id, attempt, delaySeconds }
+	failedEvents: [], // { id, attempts, reason }
 	requestLog: [], // { method, url, userAgent, time }
 	nextWebhookId: 1,
 	nextSeq: 1,
 };
+
+// Fällige Redeliveries in den Feed übernehmen (Sequenznummer erst jetzt vergeben,
+// damit der Cursor monoton bleibt)
+function materializeScheduled() {
+	const now = Date.now();
+	const due = state.scheduled.filter((s) => s.dueAt <= now);
+	state.scheduled = state.scheduled.filter((s) => s.dueAt > now);
+	for (const { event } of due) {
+		state.events.push({ ...event, seq: state.nextSeq++ });
+	}
+}
 
 function json(res, code, body) {
 	res.writeHead(code, { 'content-type': 'application/json' });
@@ -119,22 +133,30 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 204, {});
 		}
 	}
-	// Redeliver: Event erscheint erneut im Feed (neue Sequenznummer, attempt aus dem Request)
+	// Redeliver: Event erscheint nach delaySeconds erneut im Feed
 	const redeliverMatch = path.match(/^\/events\/([^/]+)\/redeliver$/);
 	if (redeliverMatch && req.method === 'POST') {
 		const body = await readBody(req);
 		const original = [...state.events].reverse().find((e) => e.id === redeliverMatch[1]);
 		if (!original) return json(res, 404, { message: 'Unknown event' });
-		const redelivered = {
-			...original,
-			seq: state.nextSeq++,
-			attempt: body.attempt ?? (original.attempt ?? 1) + 1,
-		};
-		state.events.push(redelivered);
-		console.log(`  -> redeliver ${redelivered.id} as attempt ${redelivered.attempt}`);
-		return json(res, 201, { id: redelivered.id, attempt: redelivered.attempt });
+		const attempt = body.attempt ?? (original.attempt ?? 1) + 1;
+		const delaySeconds = body.delaySeconds ?? 0;
+		const { seq, ...event } = original;
+		state.scheduled.push({ dueAt: Date.now() + delaySeconds * 1000, event: { ...event, attempt } });
+		state.redeliverLog.push({ id: original.id, attempt, delaySeconds });
+		console.log(`  -> redeliver ${original.id} as attempt ${attempt} in ${delaySeconds}s`);
+		return json(res, 201, { id: original.id, attempt, delaySeconds });
+	}
+	// Endgültig gescheitertes Event melden (wird dem Nutzer in HalloPetra angezeigt)
+	const failedMatch = path.match(/^\/events\/([^/]+)\/failed$/);
+	if (failedMatch && req.method === 'POST') {
+		const body = await readBody(req);
+		state.failedEvents.push({ id: failedMatch[1], attempts: body.attempts, reason: body.reason });
+		console.log(`  -> event ${failedMatch[1]} permanently failed after ${body.attempts} attempts: ${body.reason ?? '(no reason)'}`);
+		return json(res, 201, { ok: true });
 	}
 	if (path === '/events' && req.method === 'GET') {
+		materializeScheduled();
 		const after = Number(url.searchParams.get('after') ?? 0);
 		const limit = Number(url.searchParams.get('limit') ?? 50);
 		const types = url.searchParams.get('types');

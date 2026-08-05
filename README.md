@@ -29,7 +29,10 @@ Pollt den HalloPetra-Event-Feed (minimal jede Minute) und startet den Workflow m
 
 ### Petra Retry on Next Poll
 
-Gehört in den **Fehlerpfad** des Workflows (Error-Output eines Nodes bzw. „Continue (using error output)"). Ruft `POST /events/{id}/redeliver` auf — das Event erscheint daraufhin **erneut im Feed** (hinter dem Cursor, mit hochgezähltem `attempt`) und wird beim nächsten Poll wieder zugestellt. Ab „Max Attempts" (Default 5) wird nicht mehr redelivered; das Item wandert in den Output „Given Up" (dahinter lässt sich Dead-Letter-Handling bauen).
+Gehört in den **Fehlerpfad** des Workflows (Error-Output eines Nodes bzw. „Continue (using error output)"). Ruft `POST /events/{id}/redeliver` auf — das Event erscheint daraufhin **erneut im Feed** (hinter dem Cursor, mit hochgezähltem `attempt`) und wird beim nächsten Poll wieder zugestellt. Die Outputs sind optional und nur für eigenes Dead-Letter-Handling nötig.
+
+- **Fibonacci-Backoff:** Die Wartezeit bis zur erneuten Zustellung wächst mit jedem Fehlversuch: `Backoff Base` (Default 60 s) × 1, 2, 3, 5, 8, … Der Node gibt sie als `delaySeconds` an die API weiter; HalloPetra macht das Event erst danach wieder im Feed sichtbar.
+- **Failure-Report:** Ab „Max Attempts" (Default 5) wird nicht mehr redelivered — der Node meldet den endgültigen Fehlschlag per `POST /events/{id}/failed` an HalloPetra (abschaltbar), damit er dem Betrieb in der App angezeigt werden kann. Das Item wandert zusätzlich in den Output „Given Up".
 
 > **Warum Redeliver statt lokalem Retry-Speicher?** n8n teilt Workflow Static Data nicht live zwischen dem Trigger (läuft gecacht im Main-Prozess) und den Workflow-Executions — eine vom Retry-Node gesetzte Markierung würde der Poller nie sehen (im E2E-Test verifiziert). Der Redeliver-Weg funktioniert dagegen auch im Queue-Mode und macht den Poller zum einzigen Schreiber des Cursors.
 
@@ -59,7 +62,8 @@ Alle Requests: `Authorization: Bearer <API-Key>`, User-Agent `n8n-nodes-petra/<v
 | `GET /webhooks/{id}` | Registrierung prüfen → `{ id, event, url }` |
 | `DELETE /webhooks/{id}` | Webhook deregistrieren |
 | `GET /events?after=<cursor>&limit=<n>&types=<a,b>` | Feed: `{ events: [{ id, type, occurredAt, attempt, payload }], nextCursor }` — Cursor monoton und stabil, Reihenfolge garantiert, `attempt` startet bei 1 |
-| `POST /events/{id}/redeliver` | Body `{ attempt }`: Event erneut in den Feed einreihen (neue Sequenznummer, mit übergebenem `attempt`) — Grundlage der Retry-Mechanik |
+| `POST /events/{id}/redeliver` | Body `{ attempt, delaySeconds }`: Event nach `delaySeconds` erneut in den Feed einreihen (neue Sequenznummer erst bei Sichtbarkeit vergeben, damit der Cursor monoton bleibt) — Grundlage der Retry-Mechanik mit Backoff |
+| `POST /events/{id}/failed` | Body `{ attempts, reason? }`: Event ist endgültig gescheitert (Max Attempts erreicht) — dem Betrieb in der HalloPetra-App anzeigen |
 
 Beim synchronen Aufruf sollte HalloPetra mit Timeout und definiertem Fallback arbeiten — die Antwortzeit hängt von der n8n-Instanz des Kunden ab.
 

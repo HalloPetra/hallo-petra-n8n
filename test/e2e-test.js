@@ -225,7 +225,7 @@ async function phase2() {
 					type: retryType,
 					typeVersion: 1,
 					position: [600, 200],
-					parameters: { maxAttempts: 3 },
+					parameters: { maxAttempts: 3, backoffSeconds: 10 },
 					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
 				},
 				{
@@ -298,14 +298,26 @@ async function phase3() {
 
 	// Mock-Log: Redeliver-Calls des Retry-Nodes
 	const mockState = await mock('GET', '/_test/state');
-	const redelivers = mockState.requestLog.filter((r) => r.url.includes('/redeliver'));
-	console.log('Redeliver-Calls:', JSON.stringify(redelivers.map((r) => r.url)));
+	const redelivers = mockState.redeliverLog;
+	console.log('Redeliver-Log:', JSON.stringify(redelivers));
 	// maxAttempts=3: Zustellung 1 und 2 schlagen fehl und werden redelivered (attempt 2, 3),
-	// nach Fehlschlag von attempt 3 greift der Cap -> Given Up, kein weiterer Redeliver.
+	// nach Fehlschlag von attempt 3 greift der Cap -> Given Up + Failure-Report.
 	check(
 		'Fehlgeschlagenes Event wurde redelivered (genau 2x wegen maxAttempts=3)',
 		redelivers.length === 2,
 		`${redelivers.length} Redeliver-Calls`,
+	);
+	check(
+		'Fibonacci-Backoff: delaySeconds 10 (Basis x1), dann 20 (Basis x2)',
+		redelivers[0]?.delaySeconds === 10 && redelivers[1]?.delaySeconds === 20,
+		JSON.stringify(redelivers.map((r) => r.delaySeconds)),
+	);
+	console.log('Failed-Events:', JSON.stringify(mockState.failedEvents));
+	const failed = mockState.failedEvents.find((f) => f.id === 'evt_fail');
+	check(
+		'Endgültiger Fehlschlag wurde an HalloPetra gemeldet (attempts=3, mit Grund)',
+		failed?.attempts === 3 && typeof failed?.reason === 'string' && failed.reason.length > 0,
+		JSON.stringify(failed),
 	);
 	const cursorFetches = mockState.requestLog.filter((r) => r.url.includes('after='));
 	check('Cursor wird fortgeschrieben (after=-Parameter in Feed-Polls)', cursorFetches.length >= 1, cursorFetches.map((r) => r.url).slice(-3).join(' | '));

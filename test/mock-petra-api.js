@@ -99,12 +99,12 @@ const server = http.createServer(async (req, res) => {
 	if (path === '/me' && req.method === 'GET') {
 		return json(res, 200, { company: 'Testbetrieb GmbH' });
 	}
-	if (path === '/webhook-types' && req.method === 'GET') {
+	if (path === '/webhooks/types' && req.method === 'GET') {
 		return json(res, 200, {
 			types: [{ slug: 'pre_call', label: 'Pre-Call', description: 'Before an outbound call starts' }],
 		});
 	}
-	if (path === '/event-types' && req.method === 'GET') {
+	if (path === '/events/types' && req.method === 'GET') {
 		return json(res, 200, {
 			types: [
 				{ slug: 'call.ended', label: 'Call Ended' },

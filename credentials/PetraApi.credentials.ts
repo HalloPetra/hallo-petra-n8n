@@ -46,7 +46,7 @@ export class PetraApi implements ICredentialType {
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/me',
+			url: '/events/types',
 		},
 	};
 }

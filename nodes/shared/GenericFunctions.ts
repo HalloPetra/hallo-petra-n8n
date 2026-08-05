@@ -72,7 +72,7 @@ export async function petraApiRequest(
 // Both type listing endpoints return { types: [{ slug, label, description? }] }.
 export async function loadPetraTypes(
 	this: ILoadOptionsFunctions,
-	endpoint: '/webhook-types' | '/event-types',
+	endpoint: '/webhooks/types' | '/events/types',
 ): Promise<INodePropertyOptions[]> {
 	const response = await petraApiRequest.call(this, 'GET', endpoint);
 	const types = (response.types ?? []) as Array<{

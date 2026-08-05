@@ -70,9 +70,8 @@ Alle Requests: `Authorization: Bearer <API-Key>`, User-Agent `n8n-nodes-petra/<v
 
 | Endpunkt | Zweck |
 | --- | --- |
-| `GET /me` | Auth-Check für den Credential-Test |
-| `GET /webhook-types` | Verfügbare synchrone Hook-Typen: `{ types: [{ slug, label, description? }] }` |
-| `GET /event-types` | Verfügbare Feed-Event-Typen, gleiches Format |
+| `GET /events/types` | Verfügbare Feed-Event-Typen: `{ types: [{ slug, label, description? }] }` — wird auch als Auth-Check für den Credential-Test benutzt (existiert bereits, Make-Integration nutzt ihn) |
+| `GET /webhooks/types` | Verfügbare synchrone Hook-Typen, gleiches Format |
 | `POST /webhooks` | Webhook registrieren: Body `{ event, url }` → `{ id, secret }`; mit `secret` signiert HalloPetra eingehende Calls (HMAC-SHA256 des Raw-Body, Header `X-Petra-Signature`, hex) |
 | `GET /webhooks/{id}` | Registrierung prüfen → `{ id, event, url }` |
 | `DELETE /webhooks/{id}` | Webhook deregistrieren |

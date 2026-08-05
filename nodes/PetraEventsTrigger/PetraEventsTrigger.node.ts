@@ -74,7 +74,7 @@ export class PetraEventsTrigger implements INodeType {
 	methods = {
 		loadOptions: {
 			async getEventTypes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return await loadPetraTypes.call(this, '/event-types');
+				return await loadPetraTypes.call(this, '/events/types');
 			},
 		},
 	};

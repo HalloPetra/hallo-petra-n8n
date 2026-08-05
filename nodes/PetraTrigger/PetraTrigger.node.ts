@@ -115,7 +115,7 @@ export class PetraTrigger implements INodeType {
 	methods = {
 		loadOptions: {
 			async getHookTypes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return await loadPetraTypes.call(this, '/webhook-types');
+				return await loadPetraTypes.call(this, '/webhooks/types');
 			},
 		},
 	};

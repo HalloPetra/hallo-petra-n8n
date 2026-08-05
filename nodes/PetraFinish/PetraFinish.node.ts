@@ -17,9 +17,9 @@ export class PetraFinish implements INodeType {
 		group: ['transform'],
 		version: 1,
 		usableAsTool: true,
-		subtitle: '={{$parameter["respondWith"]}}',
+		subtitle: 'respond to HalloPetra',
 		description:
-			'Sends the synchronous HTTP response back to HalloPetra for a workflow started by a Petra Webhook trigger with "Respond: Using Petra Finish Node". Terminal node without outputs — to run additional steps after responding, branch off before this node.',
+			'Sends the synchronous response back to HalloPetra in the format the Petra agent expects (contact data, additional data, content). Terminal node without outputs — to run additional steps after responding, branch off before this node.',
 		defaults: {
 			name: 'Petra Finish',
 		},
@@ -27,40 +27,122 @@ export class PetraFinish implements INodeType {
 		outputs: [],
 		properties: [
 			{
-				displayName: 'Respond With',
-				name: 'respondWith',
+				displayName: 'Contact',
+				name: 'contact',
+				type: 'collection',
+				placeholder: 'Add contact field',
+				default: {},
+				description: 'Contact data that ends up in the context of the Petra agent',
+				options: [
+					{
+						displayName: 'Address',
+						name: 'address',
+						type: 'string',
+						default: '',
+						description: 'Postal address of the contact, e.g. "Musterstraße 1, 12345 Musterstadt"',
+					},
+					{
+						displayName: 'Email',
+						name: 'email',
+						type: 'string',
+						placeholder: 'name@email.com',
+						default: '',
+						description: 'Email address of the contact',
+					},
+					{
+						displayName: 'Name',
+						name: 'name',
+						type: 'string',
+						default: '',
+						description: 'Full name of the contact, e.g. "Max Mustermann"',
+					},
+					{
+						displayName: 'Phone',
+						name: 'phone',
+						type: 'string',
+						default: '',
+						description: 'Phone number of the contact, e.g. "+491234567890"',
+					},
+				],
+			},
+			{
+				displayName: 'Other Data',
+				name: 'otherData',
+				type: 'fixedCollection',
+				typeOptions: {
+					multipleValues: true,
+				},
+				placeholder: 'Add data field',
+				default: {},
+				description: 'Additional key-value data that ends up in the context of the Petra agent',
+				options: [
+					{
+						displayName: 'Data',
+						name: 'values',
+						values: [
+							{
+								displayName: 'Key',
+								name: 'key',
+								type: 'string',
+								default: '',
+								description: 'Name of the data field, e.g. "data_1"',
+							},
+							{
+								displayName: 'Value',
+								name: 'value',
+								type: 'string',
+								default: '',
+								description: 'Value of the data field',
+							},
+						],
+					},
+				],
+			},
+			{
+				displayName: 'Content Type',
+				name: 'contentType',
 				type: 'options',
 				options: [
 					{
-						name: 'First Incoming Item',
-						value: 'firstIncomingItem',
-						description: 'Respond with the JSON of the first input item',
+						name: 'Text',
+						value: 'text',
+						description: 'Content is free-form text',
 					},
 					{
-						name: 'All Incoming Items',
-						value: 'allIncomingItems',
-						description: 'Respond with a JSON array of all input items',
-					},
-					{
-						name: 'Custom JSON',
+						name: 'JSON',
 						value: 'json',
-						description: 'Respond with a custom JSON body',
+						description: 'Content is a JSON structure',
 					},
 				],
-				default: 'firstIncomingItem',
-				description: 'What data to send back to HalloPetra',
+				default: 'text',
+				description: 'How the content for the Petra agent is provided',
 			},
 			{
-				displayName: 'Response Body',
-				name: 'responseBody',
+				displayName: 'Content',
+				name: 'content',
+				type: 'string',
+				typeOptions: {
+					rows: 4,
+				},
+				displayOptions: {
+					show: {
+						contentType: ['text'],
+					},
+				},
+				default: '',
+				description: 'Free-form content that ends up in the context of the Petra agent',
+			},
+			{
+				displayName: 'Content (JSON)',
+				name: 'contentJson',
 				type: 'json',
 				displayOptions: {
 					show: {
-						respondWith: ['json'],
+						contentType: ['json'],
 					},
 				},
-				default: '{\n  "myField": "value"\n}',
-				description: 'The JSON body to send back to HalloPetra',
+				default: '{}',
+				description: 'JSON content that ends up in the context of the Petra agent',
 			},
 			{
 				displayName: 'Options',
@@ -86,8 +168,6 @@ export class PetraFinish implements INodeType {
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const items = this.getInputData();
-
 		const parentNodes = this.getParentNodes(this.getNode().name);
 		const hasPetraTrigger = parentNodes.some(
 			(node) => node.type === PETRA_TRIGGER_NODE_TYPE && !node.disabled,
@@ -103,27 +183,45 @@ export class PetraFinish implements INodeType {
 			);
 		}
 
-		const respondWith = this.getNodeParameter('respondWith', 0) as string;
+		const contactInput = this.getNodeParameter('contact', 0, {}) as IDataObject;
+		const contact: IDataObject = {};
+		if (contactInput.name) contact.contact_data_name = contactInput.name;
+		if (contactInput.email) contact.contact_data_email = contactInput.email;
+		if (contactInput.phone) contact.contact_data_phone = contactInput.phone;
+		if (contactInput.address) contact.contact_data_address = contactInput.address;
+
+		const otherDataInput = this.getNodeParameter('otherData.values', 0, []) as Array<{
+			key: string;
+			value: string;
+		}>;
+		const otherData: IDataObject = {};
+		for (const { key, value } of otherDataInput) {
+			if (key) otherData[key] = value;
+		}
+
+		const contentType = this.getNodeParameter('contentType', 0) as string;
+		let content: IDataObject | IDataObject[] | string;
+		if (contentType === 'json') {
+			const rawContent = this.getNodeParameter('contentJson', 0) as IDataObject | string;
+			content =
+				typeof rawContent === 'string'
+					? jsonParse<IDataObject>(rawContent, {
+							errorMessage: 'Content (JSON) must be valid JSON',
+						})
+					: rawContent;
+		} else {
+			content = this.getNodeParameter('content', 0, '') as string;
+		}
+
 		const options = this.getNodeParameter('options', 0, {}) as IDataObject;
 		const responseCode = (options.responseCode as number) ?? 200;
 
-		let responseBody: IDataObject | IDataObject[];
-		if (respondWith === 'json') {
-			const rawBody = this.getNodeParameter('responseBody', 0) as IDataObject | string;
-			responseBody =
-				typeof rawBody === 'string'
-					? jsonParse<IDataObject>(rawBody, {
-							errorMessage: 'Response Body must be valid JSON',
-						})
-					: rawBody;
-		} else if (respondWith === 'allIncomingItems') {
-			responseBody = items.map((item) => item.json);
-		} else {
-			responseBody = items[0]?.json ?? {};
-		}
-
 		this.sendResponse({
-			body: responseBody,
+			body: {
+				contact,
+				other_data: otherData,
+				content,
+			},
 			headers: { 'content-type': 'application/json' },
 			statusCode: responseCode,
 		});

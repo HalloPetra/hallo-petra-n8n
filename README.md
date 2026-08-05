@@ -19,7 +19,22 @@ Registriert beim Aktivieren des Workflows automatisch einen Webhook über die Ha
 
 ### Petra Finish
 
-Sendet die synchrone HTTP-Antwort an HalloPetra zurück — mit dem ersten Input-Item, allen Items oder einem eigenen JSON-Body. **End-Node ohne Ausgänge:** Hier endet der synchrone Teil des Workflows. Wer nach der Antwort noch weiterarbeiten will (z. B. Logging), zweigt vor dem Finish-Node in einen parallelen Ast ab — die Antwort geht raus, sobald der Finish-Node läuft.
+Sendet die synchrone Antwort an HalloPetra — strukturiert in genau dem Format, das der Petra-Agent erwartet:
+
+```json
+{
+	"contact": {
+		"contact_data_name": "Max Mustermann",
+		"contact_data_email": "max@mustermann.de",
+		"contact_data_phone": "+491234567890",
+		"contact_data_address": "Musterstraße 1, 12345 Musterstadt"
+	},
+	"other_data": { "data_1": "Wert 1" },
+	"content": "Daten als String oder JSON"
+}
+```
+
+Im Node füllt man die Kontaktfelder, beliebige Key-Value-Paare („Other Data") und den Content (Text oder JSON) — Expressions funktionieren in allen Feldern. **End-Node ohne Ausgänge:** Hier endet der synchrone Teil des Workflows. Wer nach der Antwort noch weiterarbeiten will (z. B. Logging), zweigt vor dem Finish-Node in einen parallelen Ast ab — die Antwort geht raus, sobald der Finish-Node läuft.
 
 ### Petra Events Trigger (Polling)
 

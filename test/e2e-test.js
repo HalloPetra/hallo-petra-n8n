@@ -129,8 +129,13 @@ async function phase1() {
 					typeVersion: 1,
 					position: [300, 0],
 					parameters: {
-						respondWith: 'json',
-						responseBody: '={ "greeting": "Hallo {{ $json.callerNumber }}", "instructions": "sei nett" }',
+						contact: {
+							name: 'Max Mustermann',
+							phone: '={{ $json.callerNumber }}',
+						},
+						otherData: { values: [{ key: 'data_1', value: 'Wert 1' }] },
+						contentType: 'text',
+						content: '=Anruf {{ $json.callId }}: sei nett',
 					},
 				},
 			],
@@ -173,8 +178,11 @@ async function phase1() {
 	} catch {}
 	check('Sync-Aufruf: Status 200', call.status === 200, `status=${call.status}`);
 	check(
-		'Sync-Aufruf: Antwort kommt vom Petra-Finish-Node',
-		responseBody.greeting === 'Hallo +491701234567',
+		'Sync-Aufruf: Antwort im Petra-Agent-Format',
+		responseBody.contact?.contact_data_name === 'Max Mustermann' &&
+			responseBody.contact?.contact_data_phone === '+491701234567' &&
+			responseBody.other_data?.data_1 === 'Wert 1' &&
+			responseBody.content === 'Anruf call_1: sei nett',
 		call.body,
 	);
 

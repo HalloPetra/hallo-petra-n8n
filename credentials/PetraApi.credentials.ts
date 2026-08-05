@@ -29,7 +29,7 @@ export class PetraApi implements ICredentialType {
 			displayName: 'Base URL',
 			name: 'baseUrl',
 			type: 'string',
-			default: 'https://api.hallopetra.de/integrations/v1',
+			default: 'https://api.hallopetra.de/v1',
 			description: 'Base URL of the HalloPetra integration API. Only change this for testing.',
 		},
 	];

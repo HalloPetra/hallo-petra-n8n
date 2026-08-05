@@ -54,7 +54,7 @@ export class PetraTrigger implements INodeType {
 				required: true,
 				default: '',
 				description:
-					'Which HalloPetra hook this workflow handles, e.g. the pre-call hook. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+					'Which synchronous HalloPetra hook this workflow handles, e.g. "call.incoming". Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Respond',
@@ -115,7 +115,7 @@ export class PetraTrigger implements INodeType {
 	methods = {
 		loadOptions: {
 			async getHookTypes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return await loadPetraTypes.call(this, '/webhooks/types');
+				return await loadPetraTypes.call(this, 'sync');
 			},
 		},
 	};

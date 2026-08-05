@@ -119,7 +119,7 @@ async function phase1() {
 					typeVersion: 1,
 					position: [0, 0],
 					webhookId: crypto.randomUUID(),
-					parameters: { hookType: 'pre_call', responseMode: 'responseNode' },
+					parameters: { hookType: 'call.incoming', responseMode: 'responseNode' },
 					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
 				},
 				{
@@ -168,7 +168,7 @@ async function phase1() {
 
 	// Synchroner Aufruf mit korrekter Signatur
 	const call = await mock('POST', '/_test/call-webhook', {
-		event: 'pre_call',
+		event: 'call.incoming',
 		payload: { callerNumber: '+491701234567', callId: 'call_1' },
 	});
 	console.log('Sync-Antwort:', JSON.stringify(call));
@@ -188,7 +188,7 @@ async function phase1() {
 
 	// Aufruf mit falscher Signatur -> 401
 	const badCall = await mock('POST', '/_test/call-webhook', {
-		event: 'pre_call',
+		event: 'call.incoming',
 		payload: { callerNumber: 'x' },
 		badSignature: true,
 	});
@@ -263,8 +263,8 @@ async function phase2() {
 	console.log('Workflow B:', state.workflowBId);
 
 	// Events einspeisen BEVOR aktiviert wird, damit der Aktivierungs-Poll sie findet
-	await mock('POST', '/_test/events', { id: 'evt_ok', type: 'call.ended', payload: { fail: false, n: 1 } });
-	await mock('POST', '/_test/events', { id: 'evt_fail', type: 'call.ended', payload: { fail: true, n: 2 } });
+	await mock('POST', '/_test/events', { id: 'evt_ok', type: 'call.finished', payload: { fail: false, n: 1 } });
+	await mock('POST', '/_test/events', { id: 'evt_fail', type: 'call.finished', payload: { fail: true, n: 2 } });
 
 	await activateWorkflow(state.workflowBId);
 	console.log('Workflow B aktiviert — warte auf Polls (jede Minute)');

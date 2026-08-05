@@ -59,7 +59,7 @@ const server = http.createServer(async (req, res) => {
 		const event = {
 			seq: state.nextSeq++,
 			id: body.id ?? `evt_${state.nextSeq}`,
-			type: body.type ?? 'call.ended',
+			type: body.type ?? 'call.finished',
 			occurredAt: new Date().toISOString(),
 			attempt: 1,
 			payload: body.payload ?? { note: 'test event' },
@@ -73,7 +73,7 @@ const server = http.createServer(async (req, res) => {
 	// Helfer: signierten Call an einen registrierten Webhook schicken
 	if (path === '/_test/call-webhook' && req.method === 'POST') {
 		const body = await readBody(req);
-		const webhook = Object.values(state.webhooks).find((w) => w.event === (body.event ?? 'pre_call'));
+		const webhook = Object.values(state.webhooks).find((w) => w.event === (body.event ?? 'call.incoming'));
 		if (!webhook) return json(res, 404, { message: 'no webhook registered' });
 		const payload = JSON.stringify(body.payload ?? { caller: '+491701234567', callId: 'call_1' });
 		const signature = crypto.createHmac('sha256', webhook.secret).update(payload).digest('hex');
@@ -96,19 +96,12 @@ const server = http.createServer(async (req, res) => {
 		return json(res, 401, { message: 'Unauthorized' });
 	}
 
-	if (path === '/me' && req.method === 'GET') {
-		return json(res, 200, { company: 'Testbetrieb GmbH' });
-	}
-	if (path === '/webhooks/types' && req.method === 'GET') {
-		return json(res, 200, {
-			types: [{ slug: 'pre_call', label: 'Pre-Call', description: 'Before an outbound call starts' }],
-		});
-	}
 	if (path === '/events/types' && req.method === 'GET') {
 		return json(res, 200, {
 			types: [
-				{ slug: 'call.ended', label: 'Call Ended' },
-				{ slug: 'call.missed', label: 'Call Missed' },
+				{ name: 'call.incoming', mode: 'sync', description: 'Fired synchronously when a call reaches Petra' },
+				{ name: 'call.finished', mode: 'async', description: 'Fired after a call ends' },
+				{ name: 'contact.created', mode: 'async', description: 'Fired when a new contact is created' },
 			],
 		});
 	}

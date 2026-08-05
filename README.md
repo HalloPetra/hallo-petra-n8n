@@ -64,19 +64,25 @@ Gehört in den **Fehlerpfad** des Workflows (Error-Output eines Nodes bzw. „Co
 3. In n8n ein **Petra API**-Credential anlegen und den API-Key eintragen.
 4. Trigger-Node in einen Workflow ziehen, Credential auswählen, Workflow aktivieren — die Webhook-Registrierung passiert automatisch.
 
-## Erwarteter API-Kontrakt (Spezifikation für das HalloPetra-Backend)
+## API-Kontrakt
 
-Alle Requests: `Authorization: Bearer <API-Key>`, User-Agent `n8n-nodes-petra/<version>`.
+Base-URL: `https://api.hallopetra.de/v1` (Preview z. B. `https://hp-api-pr-<n>.vercel.app/v1`). Alle Requests: `Authorization: Bearer <API-Key>`, User-Agent `n8n-nodes-petra/<version>`.
+
+**Bereits vorhanden** (auch von der Make-Integration genutzt):
 
 | Endpunkt | Zweck |
 | --- | --- |
-| `GET /events/types` | Verfügbare Feed-Event-Typen: `{ types: [{ slug, label, description? }] }` — wird auch als Auth-Check für den Credential-Test benutzt (existiert bereits, Make-Integration nutzt ihn) |
-| `GET /webhooks/types` | Verfügbare synchrone Hook-Typen, gleiches Format |
+| `GET /events/types` | Einheitliche Typ-Liste: `{ types: [{ name, mode: "sync"\|"async", description? }] }`. `sync`-Typen (z. B. `call.incoming`) bedient der Webhook-Trigger, `async`-Typen (z. B. `call.finished`) der Events-Trigger. Dient auch als Auth-Check für den Credential-Test. |
+| `GET /events?after=<cursor>&limit=<n>&types=<a,b>` | Feed: `{ events: [{ id, type, occurredAt, payload }], nextCursor }` — Cursor monoton, `after`-Parameter und `types`-Filter verifiziert |
+
+**Noch zu bauen** (Spezifikation für das Backend-Team):
+
+| Endpunkt | Zweck |
+| --- | --- |
 | `POST /webhooks` | Webhook registrieren: Body `{ event, url }` → `{ id, secret }`; mit `secret` signiert HalloPetra eingehende Calls (HMAC-SHA256 des Raw-Body, Header `X-Petra-Signature`, hex) |
 | `GET /webhooks/{id}` | Registrierung prüfen → `{ id, event, url }` |
 | `DELETE /webhooks/{id}` | Webhook deregistrieren |
-| `GET /events?after=<cursor>&limit=<n>&types=<a,b>` | Feed: `{ events: [{ id, type, occurredAt, attempt, payload }], nextCursor }` — Cursor monoton und stabil, Reihenfolge garantiert, `attempt` startet bei 1 |
-| `POST /events/{id}/redeliver` | Body `{ attempt, delaySeconds }`: Event nach `delaySeconds` erneut in den Feed einreihen (neue Sequenznummer erst bei Sichtbarkeit vergeben, damit der Cursor monoton bleibt) — Grundlage der Retry-Mechanik mit Backoff |
+| `POST /events/{id}/redeliver` | Body `{ attempt, delaySeconds }`: Event nach `delaySeconds` erneut in den Feed einreihen (neue Sequenznummer erst bei Sichtbarkeit vergeben, damit der Cursor monoton bleibt); Events tragen dann ein `attempt`-Feld (Default 1) — Grundlage der Retry-Mechanik mit Backoff |
 | `POST /events/{id}/failed` | Body `{ attempts, reason? }`: Event ist endgültig gescheitert (Max Attempts erreicht) — dem Betrieb in der HalloPetra-App anzeigen |
 
 Beim synchronen Aufruf sollte HalloPetra mit Timeout und definiertem Fallback arbeiten — die Antwortzeit hängt von der n8n-Instanz des Kunden ab.

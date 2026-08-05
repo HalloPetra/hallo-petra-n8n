@@ -69,20 +69,23 @@ export async function petraApiRequest(
 	}
 }
 
-// Both type listing endpoints return { types: [{ slug, label, description? }] }.
+// GET /events/types returns one unified list: { types: [{ name, mode: 'sync' | 'async', description? }] }.
+// Sync types are handled by the Petra Webhook Trigger, async types by the Petra Events Trigger.
 export async function loadPetraTypes(
 	this: ILoadOptionsFunctions,
-	endpoint: '/webhooks/types' | '/events/types',
+	mode: 'sync' | 'async',
 ): Promise<INodePropertyOptions[]> {
-	const response = await petraApiRequest.call(this, 'GET', endpoint);
+	const response = await petraApiRequest.call(this, 'GET', '/events/types');
 	const types = (response.types ?? []) as Array<{
-		slug: string;
-		label?: string;
+		name: string;
+		mode?: string;
 		description?: string;
 	}>;
-	return types.map((type) => ({
-		name: type.label ?? type.slug,
-		value: type.slug,
-		description: type.description,
-	}));
+	return types
+		.filter((type) => type.mode === mode)
+		.map((type) => ({
+			name: type.name,
+			value: type.name,
+			description: type.description,
+		}));
 }

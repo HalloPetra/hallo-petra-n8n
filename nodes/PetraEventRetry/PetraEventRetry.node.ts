@@ -28,13 +28,12 @@ export class PetraEventRetry implements INodeType {
 		usableAsTool: true,
 		subtitle: '=max. {{$parameter["maxAttempts"]}} attempts',
 		description:
-			'Marks a HalloPetra event for redelivery, so the Petra Events trigger picks it up again on the next poll. Connect this node to the error path of your workflow; its outputs are optional and only needed for custom dead-letter handling.',
+			'Marks a HalloPetra event for redelivery, so the Petra Events trigger picks it up again on the next poll. Connect this node to the error path of your workflow. Terminal node without outputs: events that reach Max Attempts are reported to HalloPetra as permanently failed instead of being redelivered.',
 		defaults: {
 			name: 'Petra Retry on Next Poll',
 		},
 		inputs: [NodeConnectionTypes.Main],
-		outputs: [NodeConnectionTypes.Main, NodeConnectionTypes.Main],
-		outputNames: ['Retry Scheduled', 'Given Up'],
+		outputs: [],
 		credentials: [
 			{
 				name: 'petraApi',
@@ -60,7 +59,7 @@ export class PetraEventRetry implements INodeType {
 				},
 				default: 5,
 				description:
-					'Maximum number of delivery attempts per event, including the first one. Events whose failed attempt already reached this number go to the "Given Up" output instead of being redelivered.',
+					'Maximum number of delivery attempts per event, including the first one. Events whose failed attempt already reached this number are not redelivered anymore; instead the failure is reported to HalloPetra.',
 			},
 			{
 				displayName: 'Backoff Base (Seconds)',
@@ -100,9 +99,6 @@ export class PetraEventRetry implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 
-		const retryScheduled: INodeExecutionData[] = [];
-		const givenUp: INodeExecutionData[] = [];
-
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			const item = items[itemIndex];
 			const eventId = this.getNodeParameter('eventId', itemIndex) as string;
@@ -118,7 +114,6 @@ export class PetraEventRetry implements INodeType {
 						'Expected the event ID in "_petra.eventId" (attached by the Petra Events trigger) or via the "Event ID" parameter',
 				});
 				if (this.continueOnFail()) {
-					givenUp.push({ json: item.json, error, pairedItem: itemIndex });
 					continue;
 				}
 				throw error;
@@ -133,7 +128,6 @@ export class PetraEventRetry implements INodeType {
 						...(failureReason ? { reason: failureReason } : {}),
 					});
 				}
-				givenUp.push({ json: item.json, pairedItem: itemIndex });
 				continue;
 			}
 
@@ -142,9 +136,8 @@ export class PetraEventRetry implements INodeType {
 				attempt: attempt + 1,
 				delaySeconds: backoffSeconds * fibonacciBackoff(attempt),
 			});
-			retryScheduled.push({ json: item.json, pairedItem: itemIndex });
 		}
 
-		return [retryScheduled, givenUp];
+		return [];
 	}
 }

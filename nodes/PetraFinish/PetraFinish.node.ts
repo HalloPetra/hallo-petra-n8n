@@ -19,12 +19,12 @@ export class PetraFinish implements INodeType {
 		usableAsTool: true,
 		subtitle: '={{$parameter["respondWith"]}}',
 		description:
-			'Sends the synchronous HTTP response back to HalloPetra for a workflow started by a Petra Webhook trigger with "Respond: Using Petra Finish Node"',
+			'Sends the synchronous HTTP response back to HalloPetra for a workflow started by a Petra Webhook trigger with "Respond: Using Petra Finish Node". Terminal node without outputs — to run additional steps after responding, branch off before this node.',
 		defaults: {
 			name: 'Petra Finish',
 		},
 		inputs: [NodeConnectionTypes.Main],
-		outputs: [NodeConnectionTypes.Main],
+		outputs: [],
 		properties: [
 			{
 				displayName: 'Respond With',
@@ -128,6 +128,6 @@ export class PetraFinish implements INodeType {
 			statusCode: responseCode,
 		});
 
-		return [items];
+		return [];
 	}
 }

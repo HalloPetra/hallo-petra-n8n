@@ -236,14 +236,6 @@ async function phase2() {
 					position: [600, -100],
 					parameters: {},
 				},
-				{
-					id: crypto.randomUUID(),
-					name: 'Dead Letter',
-					type: 'n8n-nodes-base.noOp',
-					typeVersion: 1,
-					position: [900, 300],
-					parameters: {},
-				},
 			],
 			connections: {
 				'Petra Events Trigger': { main: [[{ node: 'Verarbeitung', type: 'main', index: 0 }]] },
@@ -252,9 +244,6 @@ async function phase2() {
 						[{ node: 'Erfolg', type: 'main', index: 0 }],
 						[{ node: 'Petra Event Retry', type: 'main', index: 0 }],
 					],
-				},
-				'Petra Event Retry': {
-					main: [[], [{ node: 'Dead Letter', type: 'main', index: 0 }]],
 				},
 			},
 			settings: {},

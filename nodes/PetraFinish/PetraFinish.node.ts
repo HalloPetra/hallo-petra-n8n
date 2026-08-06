@@ -285,6 +285,16 @@ export class PetraFinish implements INodeType {
 			);
 		}
 
+		// A HalloPetra call gets exactly one response, so the first item forms it by design.
+		// Surface that as a hint rather than silently dropping the rest of a batch.
+		const itemCount = this.getInputData().length;
+		if (itemCount > 1) {
+			this.addExecutionHints({
+				message: `Only the first of ${itemCount} items forms the response — HalloPetra receives a single answer per call.`,
+				location: 'outputPane',
+			});
+		}
+
 		const contactInput = this.getNodeParameter('contact', 0, {}) as IDataObject;
 		const contact: IDataObject = {};
 		if (contactInput.name) contact.contact_data_name = contactInput.name;

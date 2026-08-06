@@ -13,6 +13,8 @@ import { loadPetraTypes, petraApiRequest, type PetraEvent } from '../shared/Gene
 
 function toItem(event: PetraEvent): INodeExecutionData {
 	return {
+		// n8n runtime boundary: item json must be IDataObject; the event payload is
+		// arbitrary JSON from the HalloPetra feed, structurally compatible but not typed as such.
 		json: {
 			...event,
 			_petra: {

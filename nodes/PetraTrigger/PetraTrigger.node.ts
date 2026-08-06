@@ -260,10 +260,21 @@ export class PetraTrigger implements INodeType {
 		// Only verified when a secret exists, i.e. the webhook was registered via the API.
 		if (secret) {
 			const header = (this.getHeaderData()['x-hallopetra-signature'] as string | undefined) ?? '';
-			const rawBody = (
-				(this.getRequestObject() as unknown as { rawBody?: Buffer }).rawBody ??
-				Buffer.from(JSON.stringify(this.getBodyData()))
-			).toString('utf8');
+			// n8n runtime boundary: express.Request is augmented by n8n with the captured raw body,
+			// which the public typings do not expose. The HMAC is computed over these exact bytes —
+			// without them, verification is impossible, so fail loudly instead of a misleading 401.
+			const rawBodyBuffer = (this.getRequestObject() as unknown as { rawBody?: Buffer }).rawBody;
+			if (!rawBodyBuffer) {
+				this.logger.error(
+					'Petra webhook: raw request body is unavailable on this n8n instance — cannot verify the HalloPetra signature',
+				);
+				const response = this.getResponseObject();
+				response
+					.status(500)
+					.json({ message: 'Cannot verify signature: raw request body unavailable' });
+				return { noWebhookResponse: true };
+			}
+			const rawBody = rawBodyBuffer.toString('utf8');
 
 			let isValid = false;
 			const match = /^t=(\d+),v1=([0-9a-f]{64})$/.exec(header);

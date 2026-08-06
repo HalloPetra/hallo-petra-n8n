@@ -11,7 +11,7 @@ Das Package deckt zwei Anwendungsfälle ab:
 
 ### Petra Webhook Trigger (synchron)
 
-Registriert beim Aktivieren des Workflows automatisch einen Webhook über die HalloPetra-API (und deregistriert ihn beim Deaktivieren). Im Node wählt man den Hook-Typ (z. B. `pre_call`). Eingehende Aufrufe werden per HMAC-SHA256-Signatur (`X-Petra-Signature`) verifiziert.
+Registriert beim Aktivieren des Workflows automatisch eine Webhook-Subscription über die HalloPetra-API (und deregistriert sie beim Deaktivieren). Im Node wählt man den Hook-Typ (z. B. `call.incoming`). Eingehende Aufrufe werden per HMAC-SHA256-Signatur (`X-HalloPetra-Signature`, Details unter „API-Kontrakt") verifiziert.
 
 **Antwortmodus:** Standardmäßig antwortet der Workflow über einen **Petra Finish**-Node („Respond: Using Petra Finish Node"). Alternativ kann sofort („Immediately") oder mit dem Output des letzten Nodes („When Last Node Finishes") geantwortet werden.
 
@@ -68,7 +68,7 @@ Gehört in den **Fehlerpfad** des Workflows (Error-Output eines Nodes bzw. „Co
 
 Base-URL: `https://api.hallopetra.de/v1` (Preview z. B. `https://hp-api-pr-<n>.vercel.app/v1`). Alle Requests: `Authorization: Bearer <API-Key>`, User-Agent `n8n-nodes-petra/<version>`.
 
-**Bereits vorhanden** (implementiert in `hallopetra/apps/api`, Mount `/v1`; auch von der Make-Integration genutzt):
+**Bereits vorhanden** (implementiert in `hallopetra/apps/api`, Mount `/v1`; auch von der Make-Integration genutzt — Stand: API-PR-Preview `hp-api-pr-1862`, noch nicht auf `main`; bis der API-PR gemergt ist, laufen die Nodes nur gegen die Preview bzw. den Mock):
 
 | Endpunkt | Zweck |
 | --- | --- |

@@ -119,23 +119,31 @@ export class PetraEventRetry implements INodeType {
 				throw error;
 			}
 
-			if (attempt >= maxAttempts) {
-				const reportFailure = this.getNodeParameter('reportFailure', itemIndex) as boolean;
-				if (reportFailure) {
-					const failureReason = this.getNodeParameter('failureReason', itemIndex, '') as string;
-					await petraApiRequest.call(this, 'POST', `/events/${eventId}/failed`, {
-						attempts: attempt,
-						...(failureReason ? { reason: failureReason } : {}),
-					});
+			try {
+				if (attempt >= maxAttempts) {
+					const reportFailure = this.getNodeParameter('reportFailure', itemIndex) as boolean;
+					if (reportFailure) {
+						const failureReason = this.getNodeParameter('failureReason', itemIndex, '') as string;
+						await petraApiRequest.call(this, 'POST', `/events/${eventId}/failed`, {
+							attempts: attempt,
+							...(failureReason ? { reason: failureReason } : {}),
+						});
+					}
+					continue;
 				}
-				continue;
-			}
 
-			const backoffSeconds = this.getNodeParameter('backoffSeconds', itemIndex) as number;
-			await petraApiRequest.call(this, 'POST', `/events/${eventId}/redeliver`, {
-				attempt: attempt + 1,
-				delaySeconds: backoffSeconds * fibonacciBackoff(attempt),
-			});
+				const backoffSeconds = this.getNodeParameter('backoffSeconds', itemIndex) as number;
+				await petraApiRequest.call(this, 'POST', `/events/${eventId}/redeliver`, {
+					attempt: attempt + 1,
+					delaySeconds: backoffSeconds * fibonacciBackoff(attempt),
+				});
+			} catch (error) {
+				// One flaky redeliver/report must not sink the rest of the batch
+				if (this.continueOnFail()) {
+					continue;
+				}
+				throw new NodeOperationError(this.getNode(), error as Error, { itemIndex });
+			}
 		}
 
 		return [];

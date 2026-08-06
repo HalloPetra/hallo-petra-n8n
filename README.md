@@ -134,6 +134,10 @@ node test/e2e-test.js phase3   # verify redelivery, backoff, failure report and 
 
 The mock expects the API key `test-key` and is reachable from inside the container at `http://host.docker.internal:7788` (the test script pre-configures the credential accordingly).
 
+## Contributing
+
+Architecture decisions, repository layout, the release process and the verification checklist live in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 [MIT](LICENSE.md)

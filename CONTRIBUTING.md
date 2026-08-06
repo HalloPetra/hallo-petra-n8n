@@ -1,0 +1,85 @@
+# Contributing & maintenance
+
+Developer-facing companion to the [README](README.md), which documents the package for its users. This file covers how the package is built, why it looks the way it does, and how it is released. English throughout, because n8n requires all documentation of a verified node to be in English.
+
+This package is the n8n counterpart to `make-petra` (Make.com custom app) and `zapier-petra`. All three speak the HalloPetra API v1 (`/v1/…`, bearer auth with `hp_ck_…` keys).
+
+## Components across the three integrations
+
+| n8n (this package) | Make (`make-petra`) | Zapier (`zapier-petra`) |
+| --- | --- | --- |
+| Credential **Petra API** | Connection **HalloPetra** (`petra`) | Auth with `apiKey` + `baseUrl` |
+| **Petra Webhook Trigger** — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **Watch Incoming Hooks** — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
+| **Petra Finish** — structured response node | Responder **Petra Finish (Respond to Hook)** | not portable to Zapier |
+| **Petra Events Trigger** — polling with cursor in workflow static data | **Watch Events** — cursor persisted by Make (`data.lastID`) | `performList` with cursor walking |
+| **Petra Retry on Next Poll** — redelivery through the API with Fibonacci backoff | platform retry ("Store incomplete executions" + retry error handler) | Zapier replay |
+| Dynamic type dropdowns, filtered by `mode` | RPCs `getWebhookTypes` / `getEventTypes`, same filter | `event_type_list` trigger |
+
+Signature verification is the notable difference: n8n exposes the raw request body, so this package actually verifies `X-HalloPetra-Signature`. Make cannot (no raw-body access) and relies on the unguessable webhook URL instead.
+
+## Architecture decisions
+
+**Own Finish node instead of n8n's "Respond to Webhook".** The built-in node throws from version 1.1 onwards unless one of its hardcoded trigger types (Webhook, Form, Chat, Wait) is among its parents — community triggers are not accepted. The underlying mechanism (`responseMode: 'responseNode'` plus `sendResponse()`) is generic, so `PetraFinish` implements it directly.
+
+**Redelivery through the API instead of local retry state.** The first design kept a retry set in `getWorkflowStaticData('global')`, written by the retry node and read by the poller. End-to-end testing proved this cannot work: a polling trigger runs in n8n's main process with a cached copy of the static data and never sees writes made by workflow executions. Retries therefore go through `POST /events/{id}/redeliver`; the cursor stays the single piece of client state, written only by the poller. This also survives queue mode.
+
+**Icons are raster images embedded in SVG.** The HalloPetra logo is a 3D illustration with no vector original, but the n8n linter rejects PNG icons (`node-class-description-icon-not-svg`) and a passing linter is required for verification. The icons are therefore 320 px WebP images base64-embedded in an SVG wrapper (~26 kB each). 320 px covers the worst case: n8n renders icons at up to 40 px, the canvas zooms 2×, and displays add another 2–3×. The linter also rejects identical light and dark files, so the dark variant adds a light rounded backdrop — which genuinely helps, since the blonde hair and blue jacket would otherwise blend into a dark UI.
+
+**Terminal nodes.** `PetraFinish` and `PetraEventRetry` have no outputs. Each marks the end of its path — the HTTP response has been sent, or the event has been handed back to HalloPetra. Work that should happen afterwards belongs on a branch taken *before* these nodes.
+
+## Repository structure
+
+```
+credentials/PetraApi.credentials.ts     # API key + base URL, credential test against /v1/events/types
+nodes/shared/GenericFunctions.ts        # petraApiRequest (auth, user agent, error wrapping), type loading
+nodes/PetraTrigger/                     # sync webhook trigger: subscription lifecycle + signature verification
+nodes/PetraFinish/                      # synchronous response in the agent's expected format
+nodes/PetraEventsTrigger/               # polling trigger, cursor in workflow static data
+nodes/PetraEventRetry/                  # redelivery with Fibonacci backoff + failure report
+test/mock-petra-api.js                  # mock of the HalloPetra API (subscriptions, feed, signed deliveries)
+test/e2e-test.js                        # three-phase end-to-end test against n8n in Docker
+.github/workflows/publish.yml           # npm publish with provenance, triggered by version tags
+.github/workflows/ci.yml                # lint + build on push and PR
+```
+
+Each node directory also holds its `*.node.json` codex metadata and the two icon files.
+
+## Local development
+
+See the README's development section for the commands and the Docker-based end-to-end test. Two things worth knowing:
+
+- The mock API in `test/` is the executable specification of the API contract — when the backend contract changes, change the mock in the same commit.
+- `test/e2e-state.json` (gitignored) carries the state between the three test phases: credentials, workflow ids and the session cookie.
+
+## Release
+
+Releases are cut locally and published by GitHub Actions:
+
+```bash
+npm run release      # lints, builds, prompts for the version bump, updates the changelog, commits, tags, pushes
+```
+
+Pushing the tag triggers `.github/workflows/publish.yml`, which publishes to npm **with a provenance attestation**. Since 1 May 2026 n8n only accepts verified nodes published this way — never publish from a local machine.
+
+One-time npm setup (either option works):
+
+- **Trusted publishing (recommended):** On npmjs.com, open the package settings → Publish access → Trusted Publishers → add GitHub Actions with repository `HalloPetra/hallo-petra-n8n` and workflow `publish.yml`. No token is stored anywhere.
+- **Granular access token:** Store it as the `NPM_TOKEN` repository secret.
+
+## Verification checklist
+
+Requirements n8n applies to verified community nodes, and where this package stands:
+
+- MIT licence, no runtime dependencies, TypeScript, generated from the `n8n-node` scaffolding — met
+- No access to environment variables or the file system — met
+- Node interface and all documentation in English — met
+- Published from GitHub Actions with provenance from a public repository — workflow in place, first release pending
+- `npx @n8n/scan-community-package n8n-nodes-petra` passes — can only run once the package is on npm
+- `repository` in `package.json` matches the GitHub repository, case-sensitively — met
+
+One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships four nodes. They all serve HalloPetra, and the Finish and Retry nodes are functionally bound to their triggers (a synchronous webhook is useless without a way to answer it) — worth stating explicitly in the submission.
+
+## Open points
+
+- `POST /events/{id}/redeliver` and `POST /events/{id}/failed` are specified in the README but not yet implemented in the public API. Until they ship, the retry node fails against production.
+- The package has not been published to npm yet, so it is not installable outside of a local build.

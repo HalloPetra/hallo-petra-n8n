@@ -3,7 +3,14 @@
 	"version": "0.1.0",
 	"description": "n8n community nodes for HalloPetra: synchronous pre-call webhooks and the HalloPetra event feed",
 	"license": "MIT",
-	"homepage": "https://hallopetra.de",
+	"homepage": "https://github.com/HalloPetra/hallo-petra-n8n",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/HalloPetra/hallo-petra-n8n.git"
+	},
+	"bugs": {
+		"url": "https://github.com/HalloPetra/hallo-petra-n8n/issues"
+	},
 	"keywords": [
 		"n8n-community-node-package"
 	],

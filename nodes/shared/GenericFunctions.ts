@@ -14,7 +14,7 @@ import { NodeApiError } from 'n8n-workflow';
 
 import { version as packageVersion } from '../../package.json';
 
-export const USER_AGENT = `n8n-nodes-petra/${packageVersion}`;
+export const USER_AGENT = `n8n-nodes-hallopetra/${packageVersion}`;
 
 export type PetraApiContext =
 	| IExecuteFunctions

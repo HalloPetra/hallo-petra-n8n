@@ -74,7 +74,7 @@ Requirements n8n applies to verified community nodes, and where this package sta
 - No access to environment variables or the file system — met
 - Node interface and all documentation in English — met
 - Published from GitHub Actions with provenance from a public repository — workflow in place, first release pending
-- `npx @n8n/scan-community-package n8n-nodes-petra` passes — can only run once the package is on npm
+- `npx @n8n/scan-community-package @hallopetra/n8n-nodes-hallopetra` passes — can only run once the package is on npm
 - `repository` in `package.json` matches the GitHub repository, case-sensitively — met
 
 One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships four nodes. They all serve HalloPetra, and the Finish and Retry nodes are functionally bound to their triggers (a synchronous webhook is useless without a way to answer it) — worth stating explicitly in the submission.

@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 import { jsonParse, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-const PETRA_TRIGGER_NODE_TYPE = 'n8n-nodes-petra.petraTrigger';
+const PETRA_TRIGGER_NODE_TYPE = '@hallopetra/n8n-nodes-hallopetra.petraTrigger';
 
 export class PetraFinish implements INodeType {
 	description: INodeTypeDescription = {

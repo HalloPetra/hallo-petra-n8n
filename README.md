@@ -1,4 +1,4 @@
-# n8n-nodes-petra
+# @hallopetra/n8n-nodes-hallopetra
 
 n8n community node package that connects [HalloPetra](https://hallopetra.de) — the AI phone assistant for trade businesses — to n8n workflows.
 
@@ -9,7 +9,7 @@ It covers two integration patterns:
 
 ## Installation
 
-1. In n8n, go to **Settings → Community Nodes → Install** and enter `n8n-nodes-petra`.
+1. In n8n, go to **Settings → Community Nodes → Install** and enter `@hallopetra/n8n-nodes-hallopetra`.
 2. In the HalloPetra app, create an API key for the integration (format `hp_ck_…`).
 3. In n8n, create a **Petra API** credential and paste the key. The default base URL is `https://api.hallopetra.de/v1`. Use **Test** to confirm the connection.
 4. Add a Petra trigger to a workflow, select the credential and publish the workflow — webhook registration happens automatically.
@@ -88,7 +88,7 @@ Petra Events Trigger (call.finished)
 
 ## API contract
 
-Base URL `https://api.hallopetra.de/v1`. Every request sends `Authorization: Bearer <API key>` and the user agent `n8n-nodes-petra/<version>`.
+Base URL `https://api.hallopetra.de/v1`. Every request sends `Authorization: Bearer <API key>` and the user agent `n8n-nodes-hallopetra/<version>`.
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -121,7 +121,7 @@ npm run build && npm pack --pack-destination /tmp   # build the tarball
 node test/mock-petra-api.js &                       # mock API on port 7788
 
 DATA=$(mktemp -d) && chmod 777 "$DATA"
-docker run --rm -v "$DATA:/home/node/.n8n" -v /tmp/n8n-nodes-petra-0.1.0.tgz:/tmp/petra.tgz \
+docker run --rm -v "$DATA:/home/node/.n8n" -v /tmp/hallopetra-n8n-nodes-hallopetra-0.1.0.tgz:/tmp/petra.tgz \
   --entrypoint sh n8nio/n8n:latest -c "mkdir -p /home/node/.n8n/nodes && cd /home/node/.n8n/nodes && npm install /tmp/petra.tgz"
 docker run -d --name n8n-petra -p 5678:5678 -v "$DATA:/home/node/.n8n" \
   -e N8N_SECURE_COOKIE=false n8nio/n8n:latest

@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-petra.petraEventsTrigger",
+	"node": "@hallopetra/n8n-nodes-hallopetra.petraEventsTrigger",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Communication"],

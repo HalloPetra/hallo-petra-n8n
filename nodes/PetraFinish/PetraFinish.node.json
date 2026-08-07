@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-petra.petraFinish",
+	"node": "@hallopetra/n8n-nodes-hallopetra.petraFinish",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Communication"],

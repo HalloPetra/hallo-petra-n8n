@@ -1,5 +1,5 @@
 {
-	"node": "n8n-nodes-petra.petraEventRetry",
+	"node": "@hallopetra/n8n-nodes-hallopetra.petraEventRetry",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Communication"],

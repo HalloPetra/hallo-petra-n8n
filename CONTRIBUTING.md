@@ -13,9 +13,9 @@ HalloPetra is **the digital office worker** ("digitale Bürokraft"), never an AI
 | n8n (this package) | Make (`hallo-petra-make`) | Zapier (`zapier-petra`) |
 | --- | --- | --- |
 | Credential **Petra API** | Connection **HalloPetra** (`petra`) | Auth with `apiKey` + `baseUrl` |
-| **Petra Webhook Trigger** — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **"Vor einem Anruf"** (`watch-hooks`) — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
-| **Petra Finish** — structured response node | Responder **"Antwort an Petra"** (`respond`) | not portable to Zapier |
-| **Petra Events Trigger** — polling with cursor in workflow static data | **"Auf Petra reagieren"** (`watch-events`) — cursor persisted by Make (`data.lastID`) | `performList` with cursor walking |
+| **Petra Incoming Call Trigger** — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **"Vor einem Anruf"** (`watch-hooks`) — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
+| **Reply to Petra** — structured response node | Responder **"Antwort an Petra"** (`respond`) | not portable to Zapier |
+| **Petra Activity Trigger** — polling with cursor in workflow static data | **"Auf Petra reagieren"** (`watch-events`) — cursor persisted by Make (`data.lastID`) | `performList` with cursor walking |
 | **Petra Retry on Next Poll** — redelivery through the API with Fibonacci backoff | platform retry ("Store incomplete executions" + retry error handler) | Zapier replay |
 | Dynamic type dropdowns, filtered by `mode` | RPCs `getWebhookTypes` / `getEventTypes`, same filter | `event_type_list` trigger |
 | — | Universal module **"Eigener API-Aufruf"** (`make-api-call`) — required by Make's review checklist | — |
@@ -38,7 +38,7 @@ Signature verification is the notable difference: n8n exposes the raw request bo
 credentials/PetraApi.credentials.ts     # API key + base URL, credential test against /v1/events/types
 nodes/shared/GenericFunctions.ts        # petraApiRequest (auth, user agent, error wrapping), type loading
 nodes/PetraTrigger/                     # sync webhook trigger: subscription lifecycle + signature verification
-nodes/PetraFinish/                      # synchronous response in the agent's expected format
+nodes/PetraFinish/                      # synchronous response in the format Petra expects
 nodes/PetraEventsTrigger/               # polling trigger, cursor in workflow static data
 nodes/PetraEventRetry/                  # redelivery with Fibonacci backoff + failure report
 test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, feed, signed deliveries)

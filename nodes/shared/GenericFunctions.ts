@@ -70,7 +70,7 @@ export async function petraApiRequest(
 }
 
 // GET /events/types returns one unified list: { types: [{ name, mode: 'sync' | 'async', description? }] }.
-// Sync types are handled by the Petra Webhook Trigger, async types by the Petra Events Trigger.
+// Sync types are handled by the Petra Incoming Call Trigger, async types by the Petra Activity Trigger.
 export async function loadPetraTypes(
 	this: ILoadOptionsFunctions,
 	mode: 'sync' | 'async',

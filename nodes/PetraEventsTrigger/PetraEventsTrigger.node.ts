@@ -27,7 +27,7 @@ function toItem(event: PetraEvent): INodeExecutionData {
 
 export class PetraEventsTrigger implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Petra Events Trigger',
+		displayName: 'Petra Activity Trigger',
 		name: 'petraEventsTrigger',
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['trigger'],
@@ -36,9 +36,9 @@ export class PetraEventsTrigger implements INodeType {
 		usableAsTool: true,
 		subtitle: '={{$parameter["eventTypes"].length ? $parameter["eventTypes"].join(", ") : "all events"}}',
 		description:
-			'Starts the workflow for new HalloPetra events (e.g. finished calls). Polls the HalloPetra event feed; events that a "Petra Retry on Next Poll" node marked as failed are redelivered through the feed.',
+			'Starts the workflow after Petra has done something — a finished call, a new contact, a booked appointment, a submitted form. Checks the HalloPetra event feed at a fixed interval; events that a "Petra Retry on Next Poll" node marked as failed are redelivered through the feed.',
 		defaults: {
-			name: 'Petra Events Trigger',
+			name: 'Petra Activity Trigger',
 		},
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],

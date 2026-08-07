@@ -107,14 +107,14 @@ async function phase1() {
 	}
 	console.log('Credential:', state.credentialId);
 
-	// Workflow A: Petra Webhook Trigger -> Petra Finish
+	// Workflow A: Petra Incoming Call Trigger -> Reply to Petra
 	if (!state.workflowAId) {
 		const workflow = await api('POST', '/rest/workflows', {
 			name: 'E2E Sync Webhook',
 			nodes: [
 				{
 					id: crypto.randomUUID(),
-					name: 'Petra Webhook Trigger',
+					name: 'Petra Incoming Call Trigger',
 					type: triggerType,
 					typeVersion: 1,
 					position: [0, 0],
@@ -124,7 +124,7 @@ async function phase1() {
 				},
 				{
 					id: crypto.randomUUID(),
-					name: 'Petra Finish',
+					name: 'Reply to Petra',
 					type: finishType,
 					typeVersion: 1,
 					position: [300, 0],
@@ -140,8 +140,8 @@ async function phase1() {
 				},
 			],
 			connections: {
-				'Petra Webhook Trigger': {
-					main: [[{ node: 'Petra Finish', type: 'main', index: 0 }]],
+				'Petra Incoming Call Trigger': {
+					main: [[{ node: 'Reply to Petra', type: 'main', index: 0 }]],
 				},
 			},
 			settings: {},
@@ -208,7 +208,7 @@ async function phase2() {
 			nodes: [
 				{
 					id: crypto.randomUUID(),
-					name: 'Petra Events Trigger',
+					name: 'Petra Activity Trigger',
 					type: eventsType,
 					typeVersion: 1,
 					position: [0, 0],
@@ -246,7 +246,7 @@ async function phase2() {
 				},
 			],
 			connections: {
-				'Petra Events Trigger': { main: [[{ node: 'Verarbeitung', type: 'main', index: 0 }]] },
+				'Petra Activity Trigger': { main: [[{ node: 'Verarbeitung', type: 'main', index: 0 }]] },
 				Verarbeitung: {
 					main: [
 						[{ node: 'Erfolg', type: 'main', index: 0 }],

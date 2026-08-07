@@ -28,7 +28,7 @@ export class PetraEventRetry implements INodeType {
 		usableAsTool: true,
 		subtitle: '=max. {{$parameter["maxAttempts"]}} attempts',
 		description:
-			'Marks a HalloPetra event for redelivery, so the Petra Events trigger picks it up again on the next poll. Connect this node to the error path of your workflow. Terminal node without outputs: events that reach Max Attempts are reported to HalloPetra as permanently failed instead of being redelivered.',
+			'Marks a HalloPetra event for redelivery, so the Petra Activity Trigger picks it up again on the next poll. Connect this node to the error path of your workflow. Terminal node without outputs: events that reach Max Attempts are reported to HalloPetra as permanently failed instead of being redelivered.',
 		defaults: {
 			name: 'Petra Retry on Next Poll',
 		},

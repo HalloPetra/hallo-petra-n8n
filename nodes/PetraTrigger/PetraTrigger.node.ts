@@ -15,7 +15,7 @@ import { loadPetraTypes, petraApiRequest } from '../shared/GenericFunctions';
 
 export class PetraTrigger implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Petra Webhook Trigger',
+		displayName: 'Petra Incoming Call Trigger',
 		name: 'petraTrigger',
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['trigger'],
@@ -23,9 +23,9 @@ export class PetraTrigger implements INodeType {
 		usableAsTool: true,
 		subtitle: '={{$parameter["hookType"]}}',
 		description:
-			'Starts the workflow when HalloPetra calls the registered webhook, e.g. right before a phone call. The webhook is registered automatically with HalloPetra when the workflow is activated.',
+			'Starts the workflow while the phone is still ringing, before Petra takes the call — look up who is calling so Petra can greet them by name. Registers itself with HalloPetra when the workflow is published. Petra waits at most 2.5 seconds for the answer, so keep this workflow to a single lookup.',
 		defaults: {
-			name: 'Petra Webhook Trigger',
+			name: 'Petra Incoming Call Trigger',
 		},
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],
@@ -84,9 +84,9 @@ export class PetraTrigger implements INodeType {
 				type: 'options',
 				options: [
 					{
-						name: 'Using Petra Finish Node',
+						name: 'Using Reply to Petra Node',
 						value: 'responseNode',
-						description: 'The response is sent by a "Petra Finish" node in this workflow',
+						description: 'The response is sent by a "Reply to Petra" node in this workflow',
 					},
 					{
 						name: 'When Last Node Finishes',

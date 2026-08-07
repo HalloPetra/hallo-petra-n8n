@@ -11,7 +11,7 @@ const PETRA_TRIGGER_NODE_TYPE = '@hallopetra/n8n-nodes-hallopetra.petraTrigger';
 
 export class PetraFinish implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Petra Finish',
+		displayName: 'Reply to Petra',
 		name: 'petraFinish',
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['transform'],
@@ -19,9 +19,9 @@ export class PetraFinish implements INodeType {
 		usableAsTool: true,
 		subtitle: 'respond to HalloPetra',
 		description:
-			'Sends the synchronous response back to HalloPetra in the format the Petra agent expects (contact data, additional data, content). Terminal node without outputs — to run additional steps after responding, branch off before this node.',
+			'Sends what you looked up back to Petra, in the format Petra expects (contact data, additional data, content). Terminal node without outputs — to run additional steps after responding, branch off before this node.',
 		defaults: {
-			name: 'Petra Finish',
+			name: 'Reply to Petra',
 		},
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [],
@@ -32,7 +32,7 @@ export class PetraFinish implements INodeType {
 				type: 'collection',
 				placeholder: 'Add contact field',
 				default: {},
-				description: 'Contact data that ends up in the context of the Petra agent',
+				description: 'Contact data Petra has available during the call',
 				options: [
 					{
 						displayName: 'Address',
@@ -74,7 +74,7 @@ export class PetraFinish implements INodeType {
 				},
 				placeholder: 'Add data field',
 				default: {},
-				description: 'Additional key-value data that ends up in the context of the Petra agent',
+				description: 'Additional key-value data Petra has available during the call',
 				options: [
 					{
 						displayName: 'Data',
@@ -217,7 +217,7 @@ export class PetraFinish implements INodeType {
 				],
 				default: 'none',
 				description:
-					'Content that ends up in the context of the Petra agent. With "None" the response contains no content field.',
+					'Content Petra has available during the call. With "None" the response contains no content field.',
 			},
 			{
 				displayName: 'Text',
@@ -232,7 +232,7 @@ export class PetraFinish implements INodeType {
 					},
 				},
 				default: '',
-				description: 'Free-form content that ends up in the context of the Petra agent',
+				description: 'Free-form content Petra has available during the call, in plain language',
 			},
 			{
 				displayName: 'JSON',
@@ -244,7 +244,7 @@ export class PetraFinish implements INodeType {
 					},
 				},
 				default: '{}',
-				description: 'JSON content that ends up in the context of the Petra agent',
+				description: 'JSON content Petra has available during the call',
 			},
 			{
 				displayName: 'Options',
@@ -277,10 +277,10 @@ export class PetraFinish implements INodeType {
 		if (!hasPetraTrigger) {
 			throw new NodeOperationError(
 				this.getNode(),
-				'No Petra Webhook trigger found in the workflow',
+				'No Petra Incoming Call Trigger found in the workflow',
 				{
 					description:
-						'Add a "Petra Webhook" trigger to this workflow and set its "Respond" parameter to "Using Petra Finish Node"',
+						'Add a "Petra Incoming Call Trigger" to this workflow and set its "Respond" parameter to "Using Reply to Petra Node"',
 				},
 			);
 		}

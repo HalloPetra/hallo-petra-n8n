@@ -16,13 +16,13 @@ This package lets your workflows join in, in two ways:
 
 ## Nodes
 
-### Petra Webhook Trigger (synchronous)
+### Petra Incoming Call Trigger
 
 Starts the workflow when HalloPetra calls the registered webhook. When the workflow is published, the node registers a webhook through the HalloPetra API — visible in your HalloPetra dashboard under the workflow's name — and removes it again when the workflow is unpublished. Select the hook type (for example `call.incoming`) from the dropdown, which loads the available synchronous event types from your account.
 
 Incoming deliveries are verified with an HMAC signature (see [API contract](#api-contract)). If you prefer to configure the webhook URL manually in the HalloPetra app, set **Registration** to *Manual* — the node then skips both the API call and the signature check.
 
-**Respond** controls how the answer is produced: through a *Petra Finish* node (default), with the output of the last executed node, or immediately without waiting for the workflow.
+**Respond** controls how the answer is produced: through a *Reply to Petra* node (default), with the output of the last executed node, or immediately without waiting for the workflow.
 
 > **You have 2.5 seconds.** Petra waits at most 2500 ms for the response — there is no setting to extend this, because a caller is on the line. Keep the workflow to a single lookup and nothing else. n8n's own execution start-up latency counts towards that budget, so a queue-mode instance under load leaves noticeably less room than a warm one.
 >
@@ -30,7 +30,7 @@ Incoming deliveries are verified with an HMAC signature (see [API contract](#api
 
 > **Self-hosted:** Your n8n instance must know its public URL (`WEBHOOK_URL` environment variable, especially behind a reverse proxy). Otherwise n8n registers an unreachable address with HalloPetra. On n8n Cloud this works out of the box.
 
-### Petra Finish
+### Reply to Petra
 
 Sends the synchronous response back to HalloPetra in exactly the format Petra expects:
 
@@ -54,7 +54,7 @@ Under advanced options, **Persist Fields** behaves differently from everything e
 
 **All sections are optional:** anything left empty is omitted from the response entirely. This is a terminal node without outputs — it marks the end of the synchronous part. To run additional steps after responding (logging, for instance), branch off *before* this node; the response is sent the moment the node runs.
 
-### Petra Events Trigger (polling)
+### Petra Activity Trigger
 
 Polls the HalloPetra event feed (at most once per minute) and starts the workflow with a batch of new events. Every item carries `_petra` metadata (`eventId`, `attempt`) used by the retry node. Filter by event type in the node; the dropdown loads the available asynchronous types from your account.
 
@@ -82,9 +82,9 @@ Place this in the **error path** of your workflow (a node's error output, or "Co
 **Petra knows who is calling.** One lookup, then the answer — nothing in between:
 
 ```
-Petra Webhook Trigger (call.incoming)
+Petra Incoming Call Trigger (call.incoming)
   → HTTP Request (query your CRM with {{ $json.contact.phone }})
-  → Petra Finish (Contact: name/email from the CRM, Content: open tickets)
+  → Reply to Petra (Contact: name/email from the CRM, Content: open tickets)
 ```
 
 > **Phone number formats bite here.** The number arrives as your phone system delivers it — usually `+49…`, but that is not guaranteed. If your CRM stores `0170…`, the two will not match. Normalise one side before comparing, or store both spellings.
@@ -92,7 +92,7 @@ Petra Webhook Trigger (call.incoming)
 **After hanging up, the right thing happens by itself:**
 
 ```
-Petra Events Trigger (call.finished)
+Petra Activity Trigger (call.finished)
   → Code / HTTP Request (store the summary)   ── error output ──→ Petra Retry on Next Poll
 ```
 

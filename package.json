@@ -41,6 +41,7 @@
 		],
 		"nodes": [
 			"dist/nodes/PetraTrigger/PetraTrigger.node.js",
+			"dist/nodes/PetraInCallTrigger/PetraInCallTrigger.node.js",
 			"dist/nodes/PetraFinish/PetraFinish.node.js",
 			"dist/nodes/PetraEventsTrigger/PetraEventsTrigger.node.js",
 			"dist/nodes/PetraEventRetry/PetraEventRetry.node.js"

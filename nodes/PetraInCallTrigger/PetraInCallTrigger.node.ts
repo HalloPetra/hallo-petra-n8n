@@ -16,32 +16,33 @@ import {
 } from '../shared/WebhookFunctions';
 
 /** The integration point this trigger registers for — see POST /webhooks. */
-const WEBHOOK_TYPE = 'call.incoming';
+const WEBHOOK_TYPE = 'call.during';
 
 function registration(context: IHookFunctions): PetraWebhookRegistration {
 	return {
 		type: WEBHOOK_TYPE,
 		url: context.getNodeWebhookUrl('default') as string,
-		// Shown in the operator's HalloPetra dashboard — name it after the
-		// workflow so a registration can be traced back to what created it.
-		name: `n8n: ${context.getWorkflow().name ?? 'workflow'}`,
-		description: 'Registered by n8n (n8n-nodes-hallopetra)',
+		// Not decoration: these two are what Petra reads mid-conversation to
+		// decide whether this workflow is the right tool for what the caller
+		// just asked. HalloPetra rejects a `call.during` registration without them.
+		name: context.getNodeParameter('toolName') as string,
+		description: context.getNodeParameter('toolDescription') as string,
 	};
 }
 
-export class PetraTrigger implements INodeType {
+export class PetraInCallTrigger implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Petra Incoming Call Trigger',
-		name: 'petraTrigger',
+		displayName: 'Petra In-Call Trigger',
+		name: 'petraInCallTrigger',
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['trigger'],
 		version: 1,
 		usableAsTool: true,
-		subtitle: 'before Petra answers',
+		subtitle: '={{$parameter["toolName"]}}',
 		description:
-			'Starts the workflow while the phone is still ringing, before Petra takes the call — look up who is calling so Petra can greet them by name. Registers itself with HalloPetra when the workflow is published. The call data arrives as { webhook_id, event, data: { call_id, calling_phone_number, inbound_phone_number, start_time, contact, fields } }. Petra waits at most 2.5 seconds for the answer, so keep this workflow to a single lookup.',
+			'Starts the workflow while Petra is on the call, when she needs something she cannot answer herself — look up an order, check a delivery date, book a slot. Registers itself with HalloPetra as a tool Petra can reach for; the name and description below are what she reads to decide when to use it. The delivery arrives as { body: { webhook_id, call, parameter, fields } }, where "parameter" holds what Petra asked the caller. Finish the workflow with a "Reply to Petra" node so she can keep talking. Petra waits up to 10 seconds.',
 		defaults: {
-			name: 'Petra Incoming Call Trigger',
+			name: 'Petra In-Call Trigger',
 		},
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],
@@ -62,6 +63,30 @@ export class PetraTrigger implements INodeType {
 		],
 		properties: [
 			{
+				displayName: 'Tool Name',
+				name: 'toolName',
+				type: 'string',
+				required: true,
+				default: '',
+				placeholder: 'Look up order status',
+				description:
+					'What this workflow does, in a few words. Petra sees it as the name of the tool, and the operator sees it in the HalloPetra dashboard.',
+			},
+			{
+				displayName: 'Tool Description',
+				name: 'toolDescription',
+				type: 'string',
+				typeOptions: {
+					rows: 3,
+				},
+				required: true,
+				default: '',
+				placeholder:
+					'Looks up the status of an order when the caller asks about an order they placed',
+				description:
+					'When Petra should use this workflow, in plain language. This is the instruction she reads mid-conversation to decide whether to call it — be specific about the situation, not about the technical steps.',
+			},
+			{
 				displayName: 'Registration',
 				name: 'registration',
 				type: 'options',
@@ -70,7 +95,7 @@ export class PetraTrigger implements INodeType {
 						name: 'Automatic (via HalloPetra API)',
 						value: 'automatic',
 						description:
-							'Register the webhook automatically with HalloPetra when the workflow is published. Incoming calls are verified via HMAC signature.',
+							'Register the tool automatically with HalloPetra when the workflow is published. Incoming calls are verified via HMAC signature.',
 					},
 					{
 						name: 'Manual (Copy URL to HalloPetra)',
@@ -80,7 +105,7 @@ export class PetraTrigger implements INodeType {
 					},
 				],
 				default: 'automatic',
-				description: 'How the webhook becomes known to HalloPetra',
+				description: 'How the tool becomes known to HalloPetra',
 			},
 			{
 				displayName: 'Respond',

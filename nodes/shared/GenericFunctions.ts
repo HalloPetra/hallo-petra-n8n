@@ -70,10 +70,10 @@ export async function petraApiRequest(
 }
 
 // GET /events/types returns one unified list: { types: [{ name, mode: 'sync' | 'async', description? }] }.
-// Sync types are handled by the Petra Incoming Call Trigger, async types by the Petra Activity Trigger.
-export async function loadPetraTypes(
+// Only the async ones are pickable here — they are what the feed carries. The sync deliveries are
+// webhooks, and each has its own trigger node that registers for exactly one integration point.
+export async function loadFeedEventTypes(
 	this: ILoadOptionsFunctions,
-	mode: 'sync' | 'async',
 ): Promise<INodePropertyOptions[]> {
 	const response = await petraApiRequest.call(this, 'GET', '/events/types');
 	const types = (response.types ?? []) as Array<{
@@ -82,7 +82,7 @@ export async function loadPetraTypes(
 		description?: string;
 	}>;
 	return types
-		.filter((type) => type.mode === mode)
+		.filter((type) => type.mode === 'async')
 		.map((type) => ({
 			name: type.name,
 			value: type.name,

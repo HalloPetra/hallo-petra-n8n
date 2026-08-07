@@ -2,8 +2,6 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import type {
 	IDataObject,
 	IHookFunctions,
-	ILoadOptionsFunctions,
-	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
 	IWebhookFunctions,
@@ -11,7 +9,10 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
-import { loadPetraTypes, petraApiRequest } from '../shared/GenericFunctions';
+import { petraApiRequest } from '../shared/GenericFunctions';
+
+/** The integration point this trigger registers for — see POST /webhooks. */
+const WEBHOOK_TYPE = 'call.incoming';
 
 export class PetraTrigger implements INodeType {
 	description: INodeTypeDescription = {
@@ -21,9 +22,9 @@ export class PetraTrigger implements INodeType {
 		group: ['trigger'],
 		version: 1,
 		usableAsTool: true,
-		subtitle: '={{$parameter["hookType"]}}',
+		subtitle: 'before Petra answers',
 		description:
-			'Starts the workflow while the phone is still ringing, before Petra takes the call — look up who is calling so Petra can greet them by name. Registers itself with HalloPetra when the workflow is published. Petra waits at most 2.5 seconds for the answer, so keep this workflow to a single lookup.',
+			'Starts the workflow while the phone is still ringing, before Petra takes the call — look up who is calling so Petra can greet them by name. Registers itself with HalloPetra when the workflow is published. The call data arrives as { webhook_id, event, data: { call_id, calling_phone_number, inbound_phone_number, start_time, contact, fields } }. Petra waits at most 2.5 seconds for the answer, so keep this workflow to a single lookup.',
 		defaults: {
 			name: 'Petra Incoming Call Trigger',
 		},
@@ -45,18 +46,6 @@ export class PetraTrigger implements INodeType {
 			},
 		],
 		properties: [
-			{
-				displayName: 'Hook Type Name or ID',
-				name: 'hookType',
-				type: 'options',
-				typeOptions: {
-					loadOptionsMethod: 'getHookTypes',
-				},
-				required: true,
-				default: '',
-				description:
-					'Which synchronous HalloPetra hook this workflow handles, e.g. "call.incoming". Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
-			},
 			{
 				displayName: 'Registration',
 				name: 'registration',
@@ -134,14 +123,6 @@ export class PetraTrigger implements INodeType {
 		],
 	};
 
-	methods = {
-		loadOptions: {
-			async getHookTypes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return await loadPetraTypes.call(this, 'sync');
-			},
-		},
-	};
-
 	webhookMethods = {
 		default: {
 			async checkExists(this: IHookFunctions): Promise<boolean> {
@@ -154,7 +135,6 @@ export class PetraTrigger implements INodeType {
 				}
 
 				const webhookUrl = this.getNodeWebhookUrl('default');
-				const hookType = this.getNodeParameter('hookType') as string;
 				try {
 					// GET /webhooks/{id} returns the webhook itself, not a wrapper object
 					const webhook = await petraApiRequest.call(
@@ -162,7 +142,10 @@ export class PetraTrigger implements INodeType {
 						'GET',
 						`/webhooks/${staticData.webhookId}`,
 					);
-					if (webhook.url === webhookUrl && webhook.event === hookType) {
+					// The type is immutable server-side and this node only ever registers one,
+					// so a mismatch is only checked when the API actually reports a type.
+					const typeMatches = !webhook.type || webhook.type === WEBHOOK_TYPE;
+					if (webhook.url === webhookUrl && typeMatches) {
 						// The secret is retrievable, so a registration whose secret got lost
 						// (e.g. a workflow imported without its static data) can be repaired
 						// instead of silently falling back to unverified deliveries.
@@ -176,7 +159,7 @@ export class PetraTrigger implements INodeType {
 						}
 						return true;
 					}
-					// URL or hook type changed since registration — re-register from scratch
+					// URL changed since registration — re-register from scratch
 					await petraApiRequest.call(this, 'DELETE', `/webhooks/${staticData.webhookId}`);
 				} catch (error) {
 					// Webhook is unknown to HalloPetra (deleted remotely or never created)
@@ -196,12 +179,11 @@ export class PetraTrigger implements INodeType {
 					return true;
 				}
 				const webhookUrl = this.getNodeWebhookUrl('default');
-				const hookType = this.getNodeParameter('hookType') as string;
 
 				let response;
 				try {
 					response = await petraApiRequest.call(this, 'POST', '/webhooks', {
-						event: hookType,
+						type: WEBHOOK_TYPE,
 						url: webhookUrl,
 						// Shown in the operator's HalloPetra dashboard — name it after the
 						// workflow so a registration can be traced back to what created it.
@@ -218,7 +200,7 @@ export class PetraTrigger implements INodeType {
 								httpCode === '404'
 									? 'The HalloPetra API at the configured base URL has no webhook registration endpoint (yet). Check that the credential points to an environment that supports webhook registration.'
 									: httpCode === '400'
-										? `HalloPetra rejected the registration. The hook type "${hookType}" may not be deliverable by webhook — only synchronous event types can be subscribed to here.`
+										? `HalloPetra rejected the registration of type "${WEBHOOK_TYPE}". The API at the configured base URL may predate the webhook type contract — this node requires an environment that accepts "type" on POST /webhooks.`
 										: 'Check the API key and base URL in the Petra API credential.',
 						},
 					);

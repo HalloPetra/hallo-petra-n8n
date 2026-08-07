@@ -9,7 +9,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
 
-import { loadPetraTypes, petraApiRequest, type PetraEvent } from '../shared/GenericFunctions';
+import { loadFeedEventTypes, petraApiRequest, type PetraEvent } from '../shared/GenericFunctions';
 
 function toItem(event: PetraEvent): INodeExecutionData {
 	return {
@@ -76,7 +76,7 @@ export class PetraEventsTrigger implements INodeType {
 	methods = {
 		loadOptions: {
 			async getEventTypes(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return await loadPetraTypes.call(this, 'async');
+				return await loadFeedEventTypes.call(this);
 			},
 		},
 	};

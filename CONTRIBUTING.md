@@ -61,10 +61,15 @@ npm run release      # lints, builds, prompts for the version bump, updates the 
 
 Pushing the tag triggers `.github/workflows/publish.yml`, which publishes to npm **with a provenance attestation**. Since 1 May 2026 n8n only accepts verified nodes published this way — never publish from a local machine.
 
-One-time npm setup (either option works):
+**Authentication is already set up and needs no maintenance:** the package uses npm trusted publishing (OIDC). No token exists in the repository, and none should be added — a present `NPM_TOKEN` would make npm prefer token auth over OIDC and fail against the account's 2FA requirement.
 
-- **Trusted publishing (recommended):** On npmjs.com, open the package settings → Publish access → Trusted Publishers → add GitHub Actions with repository `HalloPetra/hallo-petra-n8n` and workflow `publish.yml`. No token is stored anywhere.
-- **Granular access token:** Store it as the `NPM_TOKEN` repository secret.
+The trust relationship was established with:
+
+```bash
+npm trust github --file publish.yml --allow-publish --repo HalloPetra/hallo-petra-n8n
+```
+
+Note for the record: version 0.1.0 had to be published manually from a local machine, because npm only allows configuring trusted publishing for a package that already exists (`npm trust` requires this too). It therefore carries no provenance. Every release from 0.1.1 onwards is published by the workflow with provenance.
 
 ## Verification checklist
 
@@ -73,8 +78,8 @@ Requirements n8n applies to verified community nodes, and where this package sta
 - MIT licence, no runtime dependencies, TypeScript, generated from the `n8n-node` scaffolding — met
 - No access to environment variables or the file system — met
 - Node interface and all documentation in English — met
-- Published from GitHub Actions with provenance from a public repository — workflow in place, first release pending
-- `npx @n8n/scan-community-package @hallopetra/n8n-nodes-hallopetra` passes — can only run once the package is on npm
+- Published from GitHub Actions with provenance from a public repository — met since 0.1.1 (SLSA provenance v1)
+- `npx @n8n/scan-community-package @hallopetra/n8n-nodes-hallopetra` passes — met, all security checks green
 - `repository` in `package.json` matches the GitHub repository, case-sensitively — met
 
 One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships four nodes. They all serve HalloPetra, and the Finish and Retry nodes are functionally bound to their triggers (a synchronous webhook is useless without a way to answer it) — worth stating explicitly in the submission.
@@ -82,4 +87,4 @@ One known risk: the guidelines say a package should integrate exactly one third-
 ## Open points
 
 - `POST /events/{id}/redeliver` and `POST /events/{id}/failed` are specified in the README but not yet implemented in the public API. Until they ship, the retry node fails against production.
-- The package has not been published to npm yet, so it is not installable outside of a local build.
+- Submission to the n8n Creator Portal is still open — everything it requires technically is in place.

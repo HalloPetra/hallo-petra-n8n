@@ -1,11 +1,11 @@
 # @hallopetra/n8n-nodes-hallopetra
 
-n8n community node package that connects [HalloPetra](https://hallopetra.de) — the AI phone assistant for trade businesses — to n8n workflows.
+n8n community node package that connects [HalloPetra](https://hallopetra.de) — the digital office worker for trade businesses — to n8n workflows. Petra answers the phone when nobody else can, notes what the call was about, and leaves nobody on hold.
 
-It covers two integration patterns:
+This package lets your workflows join in, in two ways:
 
-1. **Synchronous webhook (pre-call):** HalloPetra calls a webhook registered in n8n right before answering a phone call and waits for the workflow's response. The answer becomes part of the assistant's context for that call — for example customer data looked up in your CRM.
-2. **Event feed:** Workflows react to HalloPetra events (finished calls, new contacts, booked appointments, form submissions), delivered through a polled HTTP feed with built-in retry handling.
+1. **Before the call:** While the phone is still ringing, HalloPetra calls a webhook registered in n8n and waits for the answer — for example the customer record looked up in your CRM. Petra greets the caller by name instead of asking who is speaking.
+2. **After the call:** Workflows react to what Petra did (finished calls, new contacts, booked appointments, form submissions), delivered through a polled event feed with built-in retry handling. The caller ends up as a contact in your accounting software, the summary as an email in the office — nobody types up notes in the evening.
 
 ## Installation
 
@@ -24,11 +24,15 @@ Incoming deliveries are verified with an HMAC signature (see [API contract](#api
 
 **Respond** controls how the answer is produced: through a *Petra Finish* node (default), with the output of the last executed node, or immediately without waiting for the workflow.
 
+> **You have 2.5 seconds.** Petra waits at most 2500 ms for the response — there is no setting to extend this, because a caller is on the line. Keep the workflow to a single lookup and nothing else. n8n's own execution start-up latency counts towards that budget, so a queue-mode instance under load leaves noticeably less room than a warm one.
+>
+> **Nothing is ever lost if you miss it.** If the workflow is too slow, fails, or finds nothing, Petra simply greets the caller normally and carries on without the extra data. The call is never dropped and the caller never waits. The worst case is a generic greeting instead of a personal one — which is exactly what happens for every first-time caller anyway.
+
 > **Self-hosted:** Your n8n instance must know its public URL (`WEBHOOK_URL` environment variable, especially behind a reverse proxy). Otherwise n8n registers an unreachable address with HalloPetra. On n8n Cloud this works out of the box.
 
 ### Petra Finish
 
-Sends the synchronous response back to HalloPetra in exactly the format the assistant expects:
+Sends the synchronous response back to HalloPetra in exactly the format Petra expects:
 
 ```json
 {
@@ -39,12 +43,14 @@ Sends the synchronous response back to HalloPetra in exactly the format the assi
     "contact_data_address": "Musterstraße 1, 12345 Musterstadt"
   },
   "other_data": { "data_1": "value 1" },
-  "content": "Free-form context for the assistant",
+  "content": "Free-form context for Petra, in plain language",
   "fields": { "kontakt": {}, "prozess": {}, "projekt": {} }
 }
 ```
 
-Fill in the contact fields, arbitrary key-value pairs (**Other Data**), the **Content** (None/Text/JSON) and — under advanced options — **Persist Fields**, which HalloPetra stores on the contact, process or project. Expressions work in every field.
+Fill in the contact fields and arbitrary key-value pairs (**Other Data**) with what you looked up. Anything that does not fit a field belongs in **Content** (None/Text/JSON) as a plain sentence — *"Regular customer, heating last serviced in March."* Expressions work in every field.
+
+Under advanced options, **Persist Fields** behaves differently from everything else here: those values do not go into the conversation. They tell HalloPetra to store them permanently on the contact, the running process or the project.
 
 **All sections are optional:** anything left empty is omitted from the response entirely. This is a terminal node without outputs — it marks the end of the synchronous part. To run additional steps after responding (logging, for instance), branch off *before* this node; the response is sent the moment the node runs.
 
@@ -53,6 +59,8 @@ Fill in the contact fields, arbitrary key-value pairs (**Other Data**), the **Co
 Polls the HalloPetra event feed (at most once per minute) and starts the workflow with a batch of new events. Every item carries `_petra` metadata (`eventId`, `attempt`) used by the retry node. Filter by event type in the node; the dropdown loads the available asynchronous types from your account.
 
 **Semantics: delivered means done.** An event counts as processed once it has been delivered — unless a *Petra Retry on Next Poll* node asks for redelivery. The only client-side state is the feed cursor, stored in n8n's workflow static data and written exclusively by the poller.
+
+**A failed run does not lose data.** HalloPetra keeps events for **30 days**. If a workflow was broken or your CRM was unreachable, the events are still there — and a workflow that was switched off over the weekend catches up on everything once it is published again.
 
 ### Petra Retry on Next Poll
 
@@ -69,9 +77,9 @@ Place this in the **error path** of your workflow (a node's error output, or "Co
 - Delivery is **at-least-once** — build idempotent workflows.
 - Workflow static data is only persisted for active (production) workflows. In the editor's test mode the trigger therefore returns the latest events without touching the cursor.
 
-## Example workflow
+## Example workflows
 
-Look up a caller in your CRM before HalloPetra answers:
+**Petra knows who is calling.** One lookup, then the answer — nothing in between:
 
 ```
 Petra Webhook Trigger (call.incoming)
@@ -79,7 +87,9 @@ Petra Webhook Trigger (call.incoming)
   → Petra Finish (Contact: name/email from the CRM, Content: open tickets)
 ```
 
-React to finished calls:
+> **Phone number formats bite here.** The number arrives as your phone system delivers it — usually `+49…`, but that is not guaranteed. If your CRM stores `0170…`, the two will not match. Normalise one side before comparing, or store both spellings.
+
+**After hanging up, the right thing happens by itself:**
 
 ```
 Petra Events Trigger (call.finished)

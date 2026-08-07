@@ -2,18 +2,23 @@
 
 Developer-facing companion to the [README](README.md), which documents the package for its users. This file covers how the package is built, why it looks the way it does, and how it is released. English throughout, because n8n requires all documentation of a verified node to be in English.
 
-This package is the n8n counterpart to `make-petra` (Make.com custom app) and `zapier-petra`. All three speak the HalloPetra API v1 (`/v1/…`, bearer auth with `hp_ck_…` keys).
+This package is the n8n counterpart to `hallo-petra-make` (Make.com custom app) and `zapier-petra`. All three speak the HalloPetra API v1 (`/v1/…`, bearer auth with `hp_ck_…` keys).
+
+## Wording
+
+HalloPetra is **the digital office worker** ("digitale Bürokraft"), never an AI agent, AI assistant or bot — not in the README, not in node descriptions, not in field help. In German-facing material the term is "KI-Bürokraft"; in English, "digital office worker". Petra is referred to by name, the way a colleague would be. `hallo-petra-make/src/readme.md` is the reference for tone: what the user gets, in plain language, before how it works.
 
 ## Components across the three integrations
 
-| n8n (this package) | Make (`make-petra`) | Zapier (`zapier-petra`) |
+| n8n (this package) | Make (`hallo-petra-make`) | Zapier (`zapier-petra`) |
 | --- | --- | --- |
 | Credential **Petra API** | Connection **HalloPetra** (`petra`) | Auth with `apiKey` + `baseUrl` |
-| **Petra Webhook Trigger** — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **Watch Incoming Hooks** — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
-| **Petra Finish** — structured response node | Responder **Petra Finish (Respond to Hook)** | not portable to Zapier |
-| **Petra Events Trigger** — polling with cursor in workflow static data | **Watch Events** — cursor persisted by Make (`data.lastID`) | `performList` with cursor walking |
+| **Petra Webhook Trigger** — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **"Vor einem Anruf"** (`watch-hooks`) — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
+| **Petra Finish** — structured response node | Responder **"Antwort an Petra"** (`respond`) | not portable to Zapier |
+| **Petra Events Trigger** — polling with cursor in workflow static data | **"Auf Petra reagieren"** (`watch-events`) — cursor persisted by Make (`data.lastID`) | `performList` with cursor walking |
 | **Petra Retry on Next Poll** — redelivery through the API with Fibonacci backoff | platform retry ("Store incomplete executions" + retry error handler) | Zapier replay |
 | Dynamic type dropdowns, filtered by `mode` | RPCs `getWebhookTypes` / `getEventTypes`, same filter | `event_type_list` trigger |
+| — | Universal module **"Eigener API-Aufruf"** (`make-api-call`) — required by Make's review checklist | — |
 
 Signature verification is the notable difference: n8n exposes the raw request body, so this package actually verifies `X-HalloPetra-Signature`. Make cannot (no raw-body access) and relies on the unguessable webhook URL instead.
 
@@ -87,5 +92,5 @@ One known risk: the guidelines say a package should integrate exactly one third-
 ## Open points
 
 - `POST /events/{id}/redeliver` and `POST /events/{id}/failed` are specified in the README but not implemented in the public API — confirmed absent from the `/v1/events` router. Until they ship, the retry node fails against production. The API offers `GET /v1/events?ids=…` as a consumer-side alternative, but that requires the consumer to hold the retry set, which n8n cannot do (see the redelivery decision above).
-- `make-petra` still calls the old `/v1/webhook-subscriptions` paths and needs the same rename.
+- The Make app lives in `hallo-petra-make` (actively developed, already on `/v1/webhooks`); the older `make-petra` checkout still holds the pre-rename contract and is not the source of truth.
 - Submission to the n8n Creator Portal is still open — everything it requires technically is in place.

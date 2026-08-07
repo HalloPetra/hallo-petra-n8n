@@ -1,7 +1,7 @@
 {
 	"name": "@hallopetra/n8n-nodes-hallopetra",
-	"version": "0.2.0",
-	"description": "n8n community nodes for HalloPetra: synchronous pre-call webhooks and the HalloPetra event feed",
+	"version": "0.3.0",
+	"description": "n8n community nodes for HalloPetra: synchronous call webhooks, the HalloPetra event feed, contacts and tasks",
 	"license": "MIT",
 	"homepage": "https://github.com/HalloPetra/hallo-petra-n8n",
 	"repository": {

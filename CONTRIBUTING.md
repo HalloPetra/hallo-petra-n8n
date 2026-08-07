@@ -14,10 +14,12 @@ HalloPetra is **the digital office worker** ("digitale Bürokraft"), never an AI
 | --- | --- | --- |
 | Credential **Petra API** | Connection **HalloPetra** (`petra`) | Auth with `apiKey` + `baseUrl` |
 | **Petra Incoming Call Trigger** — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **"Vor einem Anruf"** (`watch-hooks`) — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
-| **Reply to Petra** — structured response node | Responder **"Antwort an Petra"** (`respond`) | not portable to Zapier |
+| **Petra In-Call Trigger** — registers `call.during` with the tool name and description | **"Während eines Anrufs"** (`watch-call-hooks`) | — |
+| **Reply to Petra** — structured response node, one selector for both phases | Responder **"Antwort an Petra"** (`respond`) — same `respondTo` selector | not portable to Zapier |
 | **Petra Activity Trigger** — polling with cursor in workflow static data | **"Auf Petra reagieren"** (`watch-events`) — cursor persisted by Make (`data.lastID`) | `performList` with cursor walking |
 | **Petra Retry on Next Poll** — redelivery through the API with Fibonacci backoff | platform retry ("Store incomplete executions" + retry error handler) | Zapier replay |
-| Dynamic type dropdowns, filtered by `mode` | RPCs `getWebhookTypes` / `getEventTypes`, same filter | `event_type_list` trigger |
+| **Create / Update Petra Contact**, **Create Petra Task** | **"Kontakt anlegen"**, **"Kontakt aktualisieren"**, **"Aufgabe erstellen"** | — |
+| Event type dropdown on the activity trigger | RPCs `getWebhookTypes` / `getEventTypes` | `event_type_list` trigger |
 | — | Universal module **"Eigener API-Aufruf"** (`make-api-call`) — required by Make's review checklist | — |
 
 Signature verification is the notable difference: n8n exposes the raw request body, so this package actually verifies `X-HalloPetra-Signature`. Make cannot (no raw-body access) and relies on the unguessable webhook URL instead.
@@ -32,16 +34,28 @@ Signature verification is the notable difference: n8n exposes the raw request bo
 
 **Terminal nodes.** `PetraFinish` and `PetraEventRetry` have no outputs. Each marks the end of its path — the HTTP response has been sent, or the event has been handed back to HalloPetra. Work that should happen afterwards belongs on a branch taken *before* these nodes.
 
+**A separate node for the in-call tool, not a second mode of the incoming-call trigger.** `call.during` differs from `call.incoming` in every way that matters to a user: the delivery is nested under `body` instead of flat under `data`, it carries the conversation so far and the parameters Petra collected, the response adds a spoken `message`, the time budget is 10 s instead of 2.5 s, and registration requires a tool name and description that have no counterpart before the greeting. Folding that into one node would give a single building block two personalities. `PetraFinish` *is* shared, through a `respondTo` selector — the same choice the Make app makes in its responder, and the reason both triggers are named in its parent check.
+
+**One trigger node per integration point, no type dropdown.** Both webhook triggers register a fixed `type`. A dropdown loading the registrable types would list two values that need entirely different nodes anyway, and the value it produced would be a parameter no user could meaningfully change. `loadFeedEventTypes` therefore only serves the activity trigger, where the feed genuinely offers a choice.
+
+**The webhook lifecycle lives in `nodes/shared/WebhookFunctions.ts`.** Registration, verification, deregistration and HMAC checking are identical for both triggers; only the registration body differs. Each node keeps its literal `webhookMethods` structure (the linter reads it) and delegates the bodies.
+
 ## Repository structure
 
 ```
 credentials/PetraApi.credentials.ts     # API key + base URL, credential test against /v1/events/types
-nodes/shared/GenericFunctions.ts        # petraApiRequest (auth, user agent, error wrapping), type loading
-nodes/PetraTrigger/                     # sync webhook trigger: subscription lifecycle + signature verification
-nodes/PetraFinish/                      # synchronous response in the format Petra expects
+nodes/shared/GenericFunctions.ts        # petraApiRequest (auth, user agent, error wrapping), feed type loading
+nodes/shared/WebhookFunctions.ts        # subscription lifecycle + HMAC verification, shared by both triggers
+nodes/shared/ContactFields.ts           # the contact attributes both contact nodes offer, and the body builder
+nodes/PetraTrigger/                     # call.incoming: before Petra answers
+nodes/PetraInCallTrigger/               # call.during: a tool Petra reaches for mid-conversation
+nodes/PetraFinish/                      # synchronous response for either phase
 nodes/PetraEventsTrigger/               # polling trigger, cursor in workflow static data
 nodes/PetraEventRetry/                  # redelivery with Fibonacci backoff + failure report
-test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, feed, signed deliveries)
+nodes/PetraContactCreate/               # POST /contacts
+nodes/PetraContactUpdate/               # PATCH /contacts/{id}
+nodes/PetraTaskCreate/                  # POST /tasks
+test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, feed, contacts, tasks)
 test/e2e-test.js                        # three-phase end-to-end test against n8n in Docker
 .github/workflows/publish.yml           # npm publish with provenance, triggered by version tags
 .github/workflows/ci.yml                # lint + build on push and PR
@@ -87,10 +101,16 @@ Requirements n8n applies to verified community nodes, and where this package sta
 - `npx @n8n/scan-community-package @hallopetra/n8n-nodes-hallopetra` passes — met, all security checks green
 - `repository` in `package.json` matches the GitHub repository, case-sensitively — met
 
-One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships four nodes. They all serve HalloPetra, and the Finish and Retry nodes are functionally bound to their triggers (a synchronous webhook is useless without a way to answer it) — worth stating explicitly in the submission.
+One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships eight nodes. They all serve HalloPetra, and they fall into three groups worth naming explicitly in the submission:
+
+- **Two synchronous triggers and their shared responder.** `PetraTrigger` and `PetraInCallTrigger` cover the two moments HalloPetra calls out and waits, and `PetraFinish` is the only way to answer either — a synchronous webhook is useless without a way to respond. The three are functionally one unit.
+- **One feed trigger and its retry node.** `PetraEventsTrigger` polls, `PetraEventRetry` hands an event back; the retry node exists because n8n cannot hold retry state across the poller boundary (see the redelivery decision above).
+- **Three action nodes.** Create contact, update contact, create task — the plain CRUD half of the same API, cut the way the Make app cuts it so users of both integrations look for the same thing.
 
 ## Open points
 
+- **The `type` contract must ship before 0.3.0 is released.** From 0.3.0 the triggers send `type` on `POST /v1/webhooks`, and the create schema is strict — an API that still expects `event` rejects every registration with a 400, and one that already expects `type` rejects the old `event`. There is no version of this package that works against both. Verified end to end against `test/mock-petra-api.js`; the check against the real API is outstanding until the backend change is deployed.
 - `POST /events/{id}/redeliver` and `POST /events/{id}/failed` are specified in the README but not implemented in the public API — confirmed absent from the `/v1/events` router. Until they ship, the retry node fails against production. The API offers `GET /v1/events?ids=…` as a consumer-side alternative, but that requires the consumer to hold the retry set, which n8n cannot do (see the redelivery decision above).
+- On the LiveKit path a `call.during` delivery can arrive unsigned, because the webhook is resolved through a view that omits the secret. `receivePetraWebhook` verifies only when a secret is known locally, so this degrades to an unverified delivery rather than a 401 — but a `call.during` webhook registered through the API does return a secret, so the trigger will start rejecting those deliveries once it has one. Worth confirming against the real API when the backend change lands.
 - The Make app lives in `hallo-petra-make` (actively developed, already on `/v1/webhooks`); the older `make-petra` checkout still holds the pre-rename contract and is not the source of truth.
 - Submission to the n8n Creator Portal is still open — everything it requires technically is in place.

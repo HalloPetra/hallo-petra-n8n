@@ -163,12 +163,30 @@ All three respect **Continue on Fail**: a failing item produces an item with an 
 **Petra knows who is calling.** One lookup, then the answer — nothing in between:
 
 ```
-Petra Incoming Call Trigger (call.incoming)
-  → HTTP Request (query your CRM with {{ $json.contact.phone }})
-  → Reply to Petra (Contact: name/email from the CRM, Content: open tickets)
+Petra Incoming Call Trigger
+  → HTTP Request (query your CRM with {{ $json.data.calling_phone_number }})
+  → Reply to Petra (Respond To: Incoming Call — Kontakt fields from the CRM,
+                    Instructions: "Regular customer, heating last serviced in March")
 ```
 
 > **Phone number formats bite here.** The number arrives as your phone system delivers it — usually `+49…`, but that is not guaranteed. If your CRM stores `0170…`, the two will not match. Normalise one side before comparing, or store both spellings.
+
+**Petra asks mid-call, and gets an answer:**
+
+```
+Petra In-Call Trigger ("Look up order status")
+  → HTTP Request (query your ERP with {{ $json.body.parameter.auftragsnummer }})
+  → Reply to Petra (Respond To: During a Call — Message: "Your order ships on Thursday")
+```
+
+**What came out of the call ends up where the business looks:**
+
+```
+Petra In-Call Trigger ("Note a new request")
+  → Update Petra Contact ({{ $json.body.call.contact_id }}, e-mail from the call)
+  → Create Petra Task (title from the request, assigned to the team)
+  → Reply to Petra (Message: "I have noted that, a colleague will call you back")
+```
 
 **After hanging up, the right thing happens by itself:**
 
@@ -183,15 +201,21 @@ Base URL `https://api.hallopetra.de/v1`. Every request sends `Authorization: Bea
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /events/types` | Event catalogue: `{ types: [{ name, label, mode: "sync"\|"async", description }] }`. `sync` types drive the webhook trigger, `async` types the events trigger. Also used to validate the credential. |
-| `POST /webhooks` | `{ url, event, name?, description?, headers? }` → `201 { webhook: { id, url, event, name, active, createdAt }, secret }`. Only `sync` event types can be subscribed to; anything else is rejected with a 400. |
+| `GET /events/types` | Event catalogue: `{ types: [{ name, label, mode: "sync"\|"async", description }] }`. The `async` types drive the activity trigger; the synchronous deliveries have a trigger node each. Also used to validate the credential. |
+| `POST /webhooks` | `{ url, type, name?, description?, headers? }` → `201 { webhook: { id, url, type, name, active, createdAt }, secret }`. `type` is `call.incoming` or `call.during`; feed events cannot be subscribed to and are rejected with a 400. `call.during` requires `name` and `description` — they become Petra's tool name and instruction. The request is strict: an unknown key (such as the pre-08/2026 `event`) is a 400. |
 | `GET /webhooks/{id}` | The webhook itself (no wrapper object), or 404 once it is gone |
 | `GET /webhooks/{id}/secret` | `{ secret }` — the signing secret stays retrievable, so a receiver can be repaired without re-registering |
+| `PATCH /webhooks/{id}` | Change `url`, `name`, `description`, `active` or `headers`. The type is immutable. |
 | `DELETE /webhooks/{id}` | `{ deleted: true, id }` |
 | `POST /webhooks/{id}/test` | Sends a representative signed delivery and reports the outcome as `{ ok, status?, body?, error? }` — useful to confirm that an n8n instance is reachable from HalloPetra |
 | `GET /events?after=&types=&ids=&limit=` | Feed: `{ events: [{ id, type, occurredAt, payload }], nextCursor }` — `after` is exclusive, `limit` max 100, async events only |
+| `POST /contacts` | `{ name?, salutation?, firstName?, lastName?, phone?, email?, address?, contactGroupIds?, fields? }` → `201` with the contact including its `id` |
+| `PATCH /contacts/{id}` | Same fields, at least one required. `fields` merges key by key; everything else is replaced. |
+| `POST /tasks` | `{ title, content?, dueAt?, recurrenceRule?, assignment?, contactId?, projektId?, origin? }` → `201` with the task |
 
-**Signature of incoming webhook calls:** `X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex>` — HMAC-SHA256 over `"<t>.<rawBody>"` using the webhook's secret, with a ±300 s tolerance (Stripe-style scheme). The trigger verifies this automatically whenever the webhook was registered through the API. If the secret is ever missing locally, the trigger re-fetches it from `GET /webhooks/{id}/secret` when the workflow is activated, rather than falling back to unverified deliveries.
+Errors come back as `{ error: { code, message, requestId } }`, where `code` is one of `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMIT_EXCEEDED`, `INTERNAL_ERROR`. Quote the `requestId` in support requests. The rate limit is 300 requests per minute per API key.
+
+**Signature of incoming webhook calls:** `X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex>` — HMAC-SHA256 over `"<t>.<rawBody>"` using the webhook's secret, with a ±300 s tolerance (Stripe-style scheme). Both triggers verify this automatically whenever the webhook was registered through the API. If the secret is ever missing locally, the trigger re-fetches it from `GET /webhooks/{id}/secret` when the workflow is activated, rather than falling back to unverified deliveries.
 
 Two endpoints backing the retry node — `POST /events/{id}/redeliver` and `POST /events/{id}/failed` — are specified but not yet available in the public API.
 
@@ -211,22 +235,24 @@ npm run lint     # lint with the n8n community node rules
 `test/` contains an end-to-end setup that installs the package as a real community package inside an n8n container and exercises it against a mock of the HalloPetra API:
 
 ```bash
-npm run build && npm pack --pack-destination /tmp   # build the tarball
-node test/mock-petra-api.js &                       # mock API on port 7788
+npm run build
+TGZ=$(npm pack --silent --pack-destination /tmp)     # build the tarball
+node test/mock-petra-api.js &                        # mock API on port 7788
 
-DATA=$(mktemp -d) && chmod 777 "$DATA"
-docker run --rm -v "$DATA:/home/node/.n8n" -v /tmp/hallopetra-n8n-nodes-hallopetra-0.1.0.tgz:/tmp/petra.tgz \
-  --entrypoint sh n8nio/n8n:latest -c "mkdir -p /home/node/.n8n/nodes && cd /home/node/.n8n/nodes && npm install /tmp/petra.tgz"
+DATA=$(mktemp -d) && chmod -R a+rwX "$DATA"
+mkdir -p "$DATA/nodes" && (cd "$DATA/nodes" && npm init -y >/dev/null && npm install "/tmp/$TGZ")
 docker run -d --name n8n-petra -p 5678:5678 -v "$DATA:/home/node/.n8n" \
-  -e N8N_SECURE_COOKIE=false n8nio/n8n:latest
+  -e "WEBHOOK_URL=http://localhost:5678/" -e N8N_SECURE_COOKIE=false n8nio/n8n:latest
 
-node test/e2e-test.js phase1   # owner setup, credential, sync round trip incl. signature check
+node test/e2e-test.js phase1   # owner setup, credential, both sync round trips, action nodes
 node test/e2e-test.js phase2   # activate the events workflow with an error path and retry node
-sleep 150
+sleep 180
 node test/e2e-test.js phase3   # verify redelivery, backoff, failure report and cursor progress
 ```
 
-The mock expects the API key `test-key` and is reachable from inside the container at `http://host.docker.internal:7788` (the test script pre-configures the credential accordingly).
+The mock expects the API key `test-key` and is reachable from inside the container at `http://host.docker.internal:7788` (the test script pre-configures the credential accordingly). `WEBHOOK_URL=http://localhost:5678/` makes n8n register a URL the mock can reach from the host — no tunnel needed for a local run. For a run against the real API, `test/n8n-docker.sh` sets a public URL instead.
+
+Phase 3 needs three feed polls to have happened (one per minute) — if its last checks fail, the third redelivery has simply not been polled yet. Wait a minute and run it again.
 
 ## Contributing
 

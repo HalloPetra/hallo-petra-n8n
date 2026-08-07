@@ -44,7 +44,10 @@
 			"dist/nodes/PetraInCallTrigger/PetraInCallTrigger.node.js",
 			"dist/nodes/PetraFinish/PetraFinish.node.js",
 			"dist/nodes/PetraEventsTrigger/PetraEventsTrigger.node.js",
-			"dist/nodes/PetraEventRetry/PetraEventRetry.node.js"
+			"dist/nodes/PetraEventRetry/PetraEventRetry.node.js",
+			"dist/nodes/PetraContactCreate/PetraContactCreate.node.js",
+			"dist/nodes/PetraContactUpdate/PetraContactUpdate.node.js",
+			"dist/nodes/PetraTaskCreate/PetraTaskCreate.node.js"
 		]
 	},
 	"devDependencies": {

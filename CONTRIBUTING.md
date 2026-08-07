@@ -36,7 +36,7 @@ nodes/PetraTrigger/                     # sync webhook trigger: subscription lif
 nodes/PetraFinish/                      # synchronous response in the agent's expected format
 nodes/PetraEventsTrigger/               # polling trigger, cursor in workflow static data
 nodes/PetraEventRetry/                  # redelivery with Fibonacci backoff + failure report
-test/mock-petra-api.js                  # mock of the HalloPetra API (subscriptions, feed, signed deliveries)
+test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, feed, signed deliveries)
 test/e2e-test.js                        # three-phase end-to-end test against n8n in Docker
 .github/workflows/publish.yml           # npm publish with provenance, triggered by version tags
 .github/workflows/ci.yml                # lint + build on push and PR
@@ -86,5 +86,6 @@ One known risk: the guidelines say a package should integrate exactly one third-
 
 ## Open points
 
-- `POST /events/{id}/redeliver` and `POST /events/{id}/failed` are specified in the README but not yet implemented in the public API. Until they ship, the retry node fails against production.
+- `POST /events/{id}/redeliver` and `POST /events/{id}/failed` are specified in the README but not implemented in the public API — confirmed absent from the `/v1/events` router. Until they ship, the retry node fails against production. The API offers `GET /v1/events?ids=…` as a consumer-side alternative, but that requires the consumer to hold the retry set, which n8n cannot do (see the redelivery decision above).
+- `make-petra` still calls the old `/v1/webhook-subscriptions` paths and needs the same rename.
 - Submission to the n8n Creator Portal is still open — everything it requires technically is in place.

@@ -7,14 +7,16 @@ const crypto = require('crypto');
 const PORT = 7788;
 const API_KEY = 'test-key';
 
+// Nur `sync`-Typen dürfen per Webhook abonniert werden; `async` gibt es nur im Feed.
+const SYNC_EVENTS = new Set(['call.incoming']);
+
 const state = {
-	webhooks: {}, // id -> { id, event, url, secret }
+	webhooks: {}, // id -> { id, event, url, name, description, secret, createdAt }
 	events: [], // { seq, id, type, occurredAt, attempt, payload }
 	scheduled: [], // Redeliveries, die erst nach dueAt in den Feed wandern
 	redeliverLog: [], // { id, attempt, delaySeconds }
 	failedEvents: [], // { id, attempts, reason }
 	requestLog: [], // { method, url, userAgent, time }
-	nextWebhookId: 1,
 	nextSeq: 1,
 };
 
@@ -40,6 +42,46 @@ function readBody(req) {
 		req.on('data', (c) => (data += c));
 		req.on('end', () => resolve(data ? JSON.parse(data) : {}));
 	});
+}
+
+// Webhook ohne Secret — genau das, was die Lese-Endpunkte zurückgeben
+function publicWebhook(w) {
+	return {
+		id: w.id,
+		name: w.name,
+		url: w.url,
+		event: w.event,
+		description: w.description,
+		active: true,
+		createdAt: w.createdAt,
+	};
+}
+
+// Signierte Zustellung wie die echte API:
+// X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex HMAC-SHA256 über "<t>.<rawBody>">
+// Ergebnis im Format von POST /webhooks/{id}/test: { ok, status, body, error }.
+async function deliverSigned(webhook, payloadObject, { badSignature = false } = {}) {
+	const payload = JSON.stringify(payloadObject);
+	const t = Math.floor(Date.now() / 1000);
+	const hmac = crypto.createHmac('sha256', webhook.secret).update(`${t}.${payload}`).digest('hex');
+	const signature = badSignature ? `t=${t},v1=${'f'.repeat(64)}` : `t=${t},v1=${hmac}`;
+	const start = Date.now();
+	try {
+		const response = await fetch(webhook.url, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json', 'x-hallopetra-signature': signature },
+			body: payload,
+		});
+		const text = await response.text();
+		return {
+			ok: response.ok,
+			status: response.status,
+			body: text,
+			durationMs: Date.now() - start,
+		};
+	} catch (error) {
+		return { ok: false, error: error.message, durationMs: Date.now() - start };
+	}
 }
 
 const server = http.createServer(async (req, res) => {
@@ -70,28 +112,17 @@ const server = http.createServer(async (req, res) => {
 	if (path === '/_test/state' && req.method === 'GET') {
 		return json(res, 200, state);
 	}
-	// Helfer: signierten Call an einen registrierten Webhook schicken
-	// (Signatur wie die echte API: X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex HMAC über "<t>.<rawBody>">)
+	// Helfer: signierten Call an einen registrierten Webhook schicken — dieselbe
+	// Zustellung wie POST /webhooks/{id}/test, nur ohne Auth und mit der
+	// Möglichkeit, absichtlich falsch zu signieren.
 	if (path === '/_test/call-webhook' && req.method === 'POST') {
 		const body = await readBody(req);
 		const webhook = Object.values(state.webhooks).find((w) => w.event === (body.event ?? 'call.incoming'));
 		if (!webhook) return json(res, 404, { message: 'no webhook registered' });
-		const payload = JSON.stringify(body.payload ?? { caller: '+491701234567', callId: 'call_1' });
-		const t = Math.floor(Date.now() / 1000);
-		const hmac = crypto.createHmac('sha256', webhook.secret).update(`${t}.${payload}`).digest('hex');
-		const signature = body.badSignature ? `t=${t},v1=${'f'.repeat(64)}` : `t=${t},v1=${hmac}`;
-		const start = Date.now();
-		try {
-			const response = await fetch(webhook.url, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json', 'x-hallopetra-signature': signature },
-				body: payload,
-			});
-			const text = await response.text();
-			return json(res, 200, { status: response.status, durationMs: Date.now() - start, body: text });
-		} catch (error) {
-			return json(res, 502, { message: error.message });
-		}
+		const result = await deliverSigned(webhook, body.payload ?? { callerNumber: '+491701234567', callId: 'call_1' }, {
+			badSignature: body.badSignature,
+		});
+		return json(res, result.error ? 502 : 200, result);
 	}
 
 	// Ab hier: Auth erforderlich
@@ -101,37 +132,81 @@ const server = http.createServer(async (req, res) => {
 
 	if (path === '/events/types' && req.method === 'GET') {
 		return json(res, 200, {
+			// `label` ist der deutsche, operator-sichtbare Name aus der echten Registry
 			types: [
-				{ name: 'call.incoming', mode: 'sync', description: 'Fired synchronously when a call reaches Petra' },
-				{ name: 'call.finished', mode: 'async', description: 'Fired after a call ends' },
-				{ name: 'contact.created', mode: 'async', description: 'Fired when a new contact is created' },
+				{
+					name: 'call.incoming',
+					label: 'Vor einem Anruf',
+					mode: 'sync',
+					description: 'Fired synchronously when a call reaches Petra',
+				},
+				{
+					name: 'call.finished',
+					label: 'Nach einem Anruf',
+					mode: 'async',
+					description: 'Fired after a call ends',
+				},
+				{
+					name: 'contact.created',
+					label: 'Neuer Kontakt',
+					mode: 'async',
+					description: 'Fired when a new contact is created',
+				},
 			],
 		});
 	}
-	if (path === '/webhook-subscriptions' && req.method === 'POST') {
+	if (path === '/webhooks' && req.method === 'POST') {
 		const body = await readBody(req);
-		const id = `sub_${state.nextWebhookId++}`;
-		const secret = crypto.randomBytes(16).toString('hex');
-		state.webhooks[id] = { id, event: body.event, url: body.url, secret };
-		console.log(`  -> registered subscription ${id} for ${body.event}: ${body.url}`);
-		return json(res, 201, {
-			subscription: { id, event: body.event, url: body.url, active: true, createdAt: new Date().toISOString() },
-			secret,
-		});
-	}
-	const webhookMatch = path.match(/^\/webhook-subscriptions\/([^/]+)$/);
-	if (webhookMatch) {
-		const webhook = state.webhooks[webhookMatch[1]];
-		if (!webhook) return json(res, 404, { message: 'Not found' });
-		if (req.method === 'GET') {
-			return json(res, 200, {
-				subscription: { id: webhook.id, event: webhook.event, url: webhook.url, active: true },
+		if (!SYNC_EVENTS.has(body.event)) {
+			return json(res, 400, {
+				error: { code: 'VALIDATION_ERROR', message: `Event ${body.event} is not deliverable by webhook` },
 			});
 		}
-		if (req.method === 'DELETE') {
+		const id = crypto.randomUUID();
+		const secret = `whsec_${crypto.randomBytes(16).toString('hex')}`;
+		state.webhooks[id] = {
+			id,
+			event: body.event,
+			url: body.url,
+			name: body.name,
+			description: body.description,
+			secret,
+			createdAt: new Date().toISOString(),
+		};
+		console.log(`  -> registered webhook ${id} for ${body.event}: ${body.url}`);
+		return json(res, 201, { webhook: publicWebhook(state.webhooks[id]), secret });
+	}
+	if (path === '/webhooks' && req.method === 'GET') {
+		const wantedUrl = url.searchParams.get('url');
+		const wantedEvent = url.searchParams.get('event');
+		const items = Object.values(state.webhooks)
+			.filter((w) => (wantedUrl ? w.url === wantedUrl : true))
+			.filter((w) => (wantedEvent ? w.event === wantedEvent : true))
+			.map(publicWebhook);
+		return json(res, 200, { items, totalCount: items.length });
+	}
+	// GET/DELETE /webhooks/{id}, GET /webhooks/{id}/secret, POST /webhooks/{id}/test
+	const webhookMatch = path.match(/^\/webhooks\/([^/]+)(\/secret|\/test)?$/);
+	if (webhookMatch) {
+		const webhook = state.webhooks[webhookMatch[1]];
+		if (!webhook) return json(res, 404, { message: 'Webhook not found' });
+		const sub = webhookMatch[2];
+
+		if (!sub && req.method === 'GET') {
+			// Die echte API antwortet mit dem Webhook selbst, nicht mit einem Wrapper
+			return json(res, 200, publicWebhook(webhook));
+		}
+		if (!sub && req.method === 'DELETE') {
 			delete state.webhooks[webhook.id];
-			console.log(`  -> deregistered subscription ${webhook.id}`);
+			console.log(`  -> deregistered webhook ${webhook.id}`);
 			return json(res, 200, { deleted: true, id: webhook.id });
+		}
+		if (sub === '/secret' && req.method === 'GET') {
+			return json(res, 200, { secret: webhook.secret });
+		}
+		if (sub === '/test' && req.method === 'POST') {
+			const result = await deliverSigned(webhook, { test: true, event: webhook.event });
+			return json(res, 200, result);
 		}
 	}
 	// Redeliver: Event erscheint nach delaySeconds erneut im Feed

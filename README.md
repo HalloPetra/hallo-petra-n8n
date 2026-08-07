@@ -18,7 +18,7 @@ It covers two integration patterns:
 
 ### Petra Webhook Trigger (synchronous)
 
-Starts the workflow when HalloPetra calls the registered webhook. When the workflow is published, the node registers a webhook subscription through the HalloPetra API and removes it again when the workflow is unpublished. Select the hook type (for example `call.incoming`) from the dropdown, which loads the available synchronous event types from your account.
+Starts the workflow when HalloPetra calls the registered webhook. When the workflow is published, the node registers a webhook through the HalloPetra API — visible in your HalloPetra dashboard under the workflow's name — and removes it again when the workflow is unpublished. Select the hook type (for example `call.incoming`) from the dropdown, which loads the available synchronous event types from your account.
 
 Incoming deliveries are verified with an HMAC signature (see [API contract](#api-contract)). If you prefer to configure the webhook URL manually in the HalloPetra app, set **Registration** to *Manual* — the node then skips both the API call and the signature check.
 
@@ -92,12 +92,15 @@ Base URL `https://api.hallopetra.de/v1`. Every request sends `Authorization: Bea
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /events/types` | Event catalogue: `{ types: [{ name, mode: "sync"\|"async", description }] }`. `sync` types drive the webhook trigger, `async` types the events trigger. Also used to validate the credential. |
-| `POST /webhook-subscriptions` | `{ url, event, description? }` → `201 { subscription: { id, url, event, active, createdAt }, secret }` — the secret is returned only here |
-| `GET/DELETE /webhook-subscriptions/{id}` | Inspect or remove a registration |
-| `GET /events?after=&types=&limit=` | Feed: `{ events: [{ id, type, occurredAt, payload }], nextCursor }` — `after` is exclusive, `limit` max 100, async events only |
+| `GET /events/types` | Event catalogue: `{ types: [{ name, label, mode: "sync"\|"async", description }] }`. `sync` types drive the webhook trigger, `async` types the events trigger. Also used to validate the credential. |
+| `POST /webhooks` | `{ url, event, name?, description?, headers? }` → `201 { webhook: { id, url, event, name, active, createdAt }, secret }`. Only `sync` event types can be subscribed to; anything else is rejected with a 400. |
+| `GET /webhooks/{id}` | The webhook itself (no wrapper object), or 404 once it is gone |
+| `GET /webhooks/{id}/secret` | `{ secret }` — the signing secret stays retrievable, so a receiver can be repaired without re-registering |
+| `DELETE /webhooks/{id}` | `{ deleted: true, id }` |
+| `POST /webhooks/{id}/test` | Sends a representative signed delivery and reports the outcome as `{ ok, status?, body?, error? }` — useful to confirm that an n8n instance is reachable from HalloPetra |
+| `GET /events?after=&types=&ids=&limit=` | Feed: `{ events: [{ id, type, occurredAt, payload }], nextCursor }` — `after` is exclusive, `limit` max 100, async events only |
 
-**Signature of incoming webhook calls:** `X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex>` — HMAC-SHA256 over `"<t>.<rawBody>"` using the subscription's secret, with a ±300 s tolerance (Stripe-style scheme). The trigger verifies this automatically whenever the webhook was registered through the API.
+**Signature of incoming webhook calls:** `X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex>` — HMAC-SHA256 over `"<t>.<rawBody>"` using the webhook's secret, with a ±300 s tolerance (Stripe-style scheme). The trigger verifies this automatically whenever the webhook was registered through the API. If the secret is ever missing locally, the trigger re-fetches it from `GET /webhooks/{id}/secret` when the workflow is activated, rather than falling back to unverified deliveries.
 
 Two endpoints backing the retry node — `POST /events/{id}/redeliver` and `POST /events/{id}/failed` — are specified but not yet available in the public API.
 

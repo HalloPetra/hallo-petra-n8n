@@ -156,21 +156,28 @@ export class PetraTrigger implements INodeType {
 				const webhookUrl = this.getNodeWebhookUrl('default');
 				const hookType = this.getNodeParameter('hookType') as string;
 				try {
-					const response = await petraApiRequest.call(
+					// GET /webhooks/{id} returns the webhook itself, not a wrapper object
+					const webhook = await petraApiRequest.call(
 						this,
 						'GET',
-						`/webhook-subscriptions/${staticData.webhookId}`,
+						`/webhooks/${staticData.webhookId}`,
 					);
-					const subscription = (response.subscription ?? response) as IDataObject;
-					if (subscription.url === webhookUrl && subscription.event === hookType) {
+					if (webhook.url === webhookUrl && webhook.event === hookType) {
+						// The secret is retrievable, so a registration whose secret got lost
+						// (e.g. a workflow imported without its static data) can be repaired
+						// instead of silently falling back to unverified deliveries.
+						if (!staticData.webhookSecret) {
+							const secretResponse = await petraApiRequest.call(
+								this,
+								'GET',
+								`/webhooks/${staticData.webhookId}/secret`,
+							);
+							staticData.webhookSecret = secretResponse.secret;
+						}
 						return true;
 					}
 					// URL or hook type changed since registration — re-register from scratch
-					await petraApiRequest.call(
-						this,
-						'DELETE',
-						`/webhook-subscriptions/${staticData.webhookId}`,
-					);
+					await petraApiRequest.call(this, 'DELETE', `/webhooks/${staticData.webhookId}`);
 				} catch (error) {
 					// Webhook is unknown to HalloPetra (deleted remotely or never created)
 					this.logger.warn(
@@ -193,35 +200,40 @@ export class PetraTrigger implements INodeType {
 
 				let response;
 				try {
-					response = await petraApiRequest.call(this, 'POST', '/webhook-subscriptions', {
+					response = await petraApiRequest.call(this, 'POST', '/webhooks', {
 						event: hookType,
 						url: webhookUrl,
-						description: 'Registered by n8n (n8n-nodes-petra)',
+						// Shown in the operator's HalloPetra dashboard — name it after the
+						// workflow so a registration can be traced back to what created it.
+						name: `n8n: ${this.getWorkflow().name ?? 'workflow'}`,
+						description: 'Registered by n8n (n8n-nodes-hallopetra)',
 					});
 				} catch (error) {
 					const httpCode = (error as { httpCode?: string }).httpCode;
 					throw new NodeOperationError(
 						this.getNode(),
-						`Could not register the webhook with HalloPetra (POST /webhook-subscriptions failed${httpCode ? ` with status ${httpCode}` : ''})`,
+						`Could not register the webhook with HalloPetra (POST /webhooks failed${httpCode ? ` with status ${httpCode}` : ''})`,
 						{
 							description:
 								httpCode === '404'
 									? 'The HalloPetra API at the configured base URL has no webhook registration endpoint (yet). Check that the credential points to an environment that supports webhook registration.'
-									: 'Check the API key and base URL in the Petra API credential.',
+									: httpCode === '400'
+										? `HalloPetra rejected the registration. The hook type "${hookType}" may not be deliverable by webhook — only synchronous event types can be subscribed to here.`
+										: 'Check the API key and base URL in the Petra API credential.',
 						},
 					);
 				}
 
-				const subscription = (response.subscription ?? {}) as IDataObject;
-				if (!subscription.id) {
+				const webhook = (response.webhook ?? {}) as IDataObject;
+				if (!webhook.id) {
 					throw new NodeOperationError(
 						this.getNode(),
-						'The HalloPetra API did not return a subscription ID',
+						'The HalloPetra API did not return a webhook ID',
 					);
 				}
 
 				const staticData = this.getWorkflowStaticData('node');
-				staticData.webhookId = subscription.id;
+				staticData.webhookId = webhook.id;
 				staticData.webhookSecret = response.secret;
 				return true;
 			},
@@ -233,11 +245,7 @@ export class PetraTrigger implements INodeType {
 				const staticData = this.getWorkflowStaticData('node');
 				if (staticData.webhookId) {
 					try {
-						await petraApiRequest.call(
-							this,
-							'DELETE',
-							`/webhook-subscriptions/${staticData.webhookId}`,
-						);
+						await petraApiRequest.call(this, 'DELETE', `/webhooks/${staticData.webhookId}`);
 					} catch (error) {
 						// Do not block deactivation — the registration may already be gone remotely
 						this.logger.warn(

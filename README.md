@@ -2,10 +2,12 @@
 
 n8n community node package that connects [HalloPetra](https://hallopetra.de) — the digital office worker for trade businesses — to n8n workflows. Petra answers the phone when nobody else can, notes what the call was about, and leaves nobody on hold.
 
-This package lets your workflows join in, in two ways:
+This package lets your workflows join in, in four ways:
 
 1. **Before the call:** While the phone is still ringing, HalloPetra calls a webhook registered in n8n and waits for the answer — for example the customer record looked up in your CRM. Petra greets the caller by name instead of asking who is speaking.
-2. **After the call:** Workflows react to what Petra did (finished calls, new contacts, booked appointments, form submissions), delivered through a polled event feed with built-in retry handling. The caller ends up as a contact in your accounting software, the summary as an email in the office — nobody types up notes in the evening.
+2. **During the call:** Petra reaches for your workflow mid-conversation, the way she would ask a colleague — *"What is the status of order A-4711?"* You answer, and she keeps talking.
+3. **After the call:** Workflows react to what Petra did (finished calls, new contacts, booked appointments, form submissions), delivered through a polled event feed with built-in retry handling. The caller ends up as a contact in your accounting software, the summary as an email in the office — nobody types up notes in the evening.
+4. **Back into HalloPetra:** Create or update a contact, put a task on the team's list — so what came out of the call is where the business already looks.
 
 ## Installation
 
@@ -18,7 +20,27 @@ This package lets your workflows join in, in two ways:
 
 ### Petra Incoming Call Trigger
 
-Starts the workflow when HalloPetra calls the registered webhook. When the workflow is published, the node registers a webhook through the HalloPetra API — visible in your HalloPetra dashboard under the workflow's name — and removes it again when the workflow is unpublished. Select the hook type (for example `call.incoming`) from the dropdown, which loads the available synchronous event types from your account.
+Starts the workflow when a call reaches Petra, before she answers. When the workflow is published, the node registers a `call.incoming` webhook through the HalloPetra API — visible in your HalloPetra dashboard under the workflow's name — and removes it again when the workflow is unpublished.
+
+The delivery looks like this:
+
+```json
+{
+  "webhook_id": "wh_…",
+  "event": "call.incoming",
+  "data": {
+    "call_id": "call_…",
+    "calling_phone_number": "+491701234567",
+    "inbound_phone_number": "+4930123456",
+    "start_time": "2026-08-07T10:15:00.000Z",
+    "contact": { "id": "…", "anrede": "Herr", "vorname": "Max", "nachname": "Mustermann",
+                 "firma": null, "telefonnummer": "+491701234567", "email": "max@example.com" },
+    "fields": { "kontakt": { "customer_number": "K-4711" } }
+  }
+}
+```
+
+`contact` is `null` when the caller is unknown — that is the normal case for a first-time caller, not an error.
 
 Incoming deliveries are verified with an HMAC signature (see [API contract](#api-contract)). If you prefer to configure the webhook URL manually in the HalloPetra app, set **Registration** to *Manual* — the node then skips both the API call and the signature check.
 
@@ -30,29 +52,74 @@ Incoming deliveries are verified with an HMAC signature (see [API contract](#api
 
 > **Self-hosted:** Your n8n instance must know its public URL (`WEBHOOK_URL` environment variable, especially behind a reverse proxy). Otherwise n8n registers an unreachable address with HalloPetra. On n8n Cloud this works out of the box.
 
-### Reply to Petra
+### Petra In-Call Trigger
 
-Sends the synchronous response back to HalloPetra in exactly the format Petra expects:
+Starts the workflow while Petra is on the call, when she needs something she cannot answer herself. She reaches for it the way she would ask a colleague — you answer, and she keeps talking.
+
+**Tool Name and Tool Description are not decoration.** They are what Petra reads mid-conversation to decide whether this workflow is the right one. Describe the *situation*, not the technical steps:
+
+- Name: *Look up order status*
+- Description: *Looks up the status of an order when the caller asks about an order they placed*
+
+The node registers a `call.during` webhook when the workflow is published; HalloPetra rejects a registration without both fields. An operator wires the tool into an Aufgabe in the HalloPetra app, and from then on Petra can reach for it.
+
+The delivery nests everything under `body`:
 
 ```json
 {
-  "contact": {
-    "contact_data_name": "Max Mustermann",
-    "contact_data_email": "max@example.com",
-    "contact_data_phone": "+491234567890",
-    "contact_data_address": "Musterstraße 1, 12345 Musterstadt"
-  },
-  "other_data": { "data_1": "value 1" },
-  "content": "Free-form context for Petra, in plain language",
-  "fields": { "kontakt": {}, "prozess": {}, "projekt": {} }
+  "body": {
+    "webhook_id": "wh_…",
+    "call": {
+      "calling_phone_number": "+491701234567",
+      "inbound_phone_number": "+4930123456",
+      "start_time": "2026-08-07T10:15:00.000Z",
+      "call_id": "call_…",
+      "duration": 42,
+      "contact_id": "…",
+      "messages": [{ "role": "user", "content": "Wie ist der Stand meines Auftrags?" }],
+      "previous_webhook_calls": []
+    },
+    "parameter": { "auftragsnummer": "A-4711" },
+    "fields": { "kontakt": { "customer_number": "K-4711" } }
+  }
 }
 ```
 
-Fill in the contact fields and arbitrary key-value pairs (**Other Data**) with what you looked up. Anything that does not fit a field belongs in **Content** (None/Text/JSON) as a plain sentence — *"Regular customer, heating last serviced in March."* Expressions work in every field.
+`parameter` holds what Petra asked the caller — the variables configured on the webhook in the HalloPetra app become the questions she asks. `messages` is the conversation so far, without the system prompt.
 
-Under advanced options, **Persist Fields** behaves differently from everything else here: those values do not go into the conversation. They tell HalloPetra to store them permanently on the contact, the running process or the project.
+> **You have 10 seconds.** More room than before the greeting, but the caller is still on the line and hears the pause. Finish with a *Reply to Petra* node so Petra knows what to say next.
 
-**All sections are optional:** anything left empty is omitted from the response entirely. This is a terminal node without outputs — it marks the end of the synchronous part. To run additional steps after responding (logging, for instance), branch off *before* this node; the response is sent the moment the node runs.
+### Reply to Petra
+
+Sends the synchronous response back to HalloPetra. **Respond To** picks which trigger this workflow started from, because the two phases expect different answers.
+
+Answering the **Incoming Call** trigger:
+
+```json
+{
+  "fields": {
+    "kontakt": { "customer_number": "K-4711" },
+    "prozess": { "anliegen": "Heizung tropft" }
+  },
+  "instructions": "Customer has an open invoice — do not raise it, note the request and pass it to accounting."
+}
+```
+
+Answering the **In-Call** trigger adds what Petra says next:
+
+```json
+{
+  "message": { "content": "Your order ships on Thursday.", "message_type": "SAY" },
+  "fields": { "kontakt": { "customer_number": "K-4711" } },
+  "instructions": "Premium customer — offer the express appointment."
+}
+```
+
+- **Message** with type *Say* is spoken to the caller. *Silent* adds the text as context for Petra without an announcement — useful when the workflow only found background information.
+- **Instructions** is how Petra should handle this call, in plain language. It goes into her prompt, it is not spoken.
+- **Persist Fields (Kontakt / Prozess)** behaves differently from everything else here: those values do not go into the conversation. They tell HalloPetra to store them permanently — *Kontakt* for lasting facts about the caller, *Prozess* for what this particular request was about. Keys are canonicalised to snake_case, and unknown ones are created on the fly.
+
+Expressions work in every field. **All sections are optional:** anything left empty is omitted from the response entirely. This is a terminal node without outputs — it marks the end of the synchronous part. To run additional steps after responding (logging, for instance), branch off *before* this node; the response is sent the moment the node runs.
 
 ### Petra Activity Trigger
 
@@ -76,6 +143,20 @@ Place this in the **error path** of your workflow (a node's error output, or "Co
 - Errors must be caught **inside the same workflow** through error outputs, otherwise the retry node never runs. If an execution crashes uncaught, the event is not redelivered (deliberate best-effort design).
 - Delivery is **at-least-once** — build idempotent workflows.
 - Workflow static data is only persisted for active (production) workflows. In the editor's test mode the trigger therefore returns the latest events without touching the cursor.
+
+### Create Petra Contact · Update Petra Contact · Create Petra Task
+
+The other direction: what came out of the call goes back into HalloPetra, where the business already looks.
+
+**Create Petra Contact** adds someone to the contact directory, so Petra knows them by name the next time they call. All fields are optional; the node returns the new contact including its ID.
+
+**Update Petra Contact** writes what you learned to an existing contact. Only the fields you fill in change. It needs the **Contact ID** — both triggers carry it when the caller was recognised (`{{ $json.data.contact.id }}` before the call, `{{ $json.body.call.contact_id }}` during it). When the caller was unknown, both are empty; that is the case for *Create Petra Contact*, not for a lookup.
+
+**Create Petra Task** puts an Aufgabe on the team's list. Only **Title** is required. **Assign To** is *Team* by default (nobody in particular — the whole team sees it), or one specific member, or Petra herself. Under additional fields: content as Markdown, a due date with an optional iCalendar recurrence rule, the contact and Projekt it belongs to, and an origin shown in the dashboard.
+
+**Field Data** on both contact nodes stores custom fields on the contact. Keys are canonicalised to snake_case (`Kundennummer` becomes `customer_number`), and keys HalloPetra has never seen are created automatically with a type inferred from the value.
+
+All three respect **Continue on Fail**: a failing item produces an item with an `error` key instead of stopping the batch.
 
 ## Example workflows
 

@@ -7,15 +7,22 @@ const crypto = require('crypto');
 const PORT = 7788;
 const API_KEY = 'test-key';
 
-// Nur `sync`-Typen dürfen per Webhook abonniert werden; `async` gibt es nur im Feed.
-const SYNC_EVENTS = new Set(['call.incoming']);
+// Registrierbar sind nur die Webhooks, auf deren Antwort Petra im Anruf wartet:
+// call.incoming vor der Begrüßung, call.during als Werkzeug mitten im Gespräch.
+// Alles andere kommt aus dem Feed (GET /events) und wird hier mit 400 abgelehnt.
+const REGISTRABLE_TYPES = new Set(['call.incoming', 'call.during']);
+// call.during ohne Name und Beschreibung wäre für Petra unsichtbar — sie liest
+// beides, um zu entscheiden, ob sie das Werkzeug aufruft.
+const DURING_CALL_TYPE = 'call.during';
 
 const state = {
-	webhooks: {}, // id -> { id, event, url, name, description, secret, createdAt }
+	webhooks: {}, // id -> { id, type, url, name, description, secret, createdAt }
 	events: [], // { seq, id, type, occurredAt, attempt, payload }
 	scheduled: [], // Redeliveries, die erst nach dueAt in den Feed wandern
 	redeliverLog: [], // { id, attempt, delaySeconds }
 	failedEvents: [], // { id, attempts, reason }
+	contacts: {}, // id -> Kontakt laut POST /contacts
+	tasks: {}, // id -> Aufgabe laut POST /tasks
 	requestLog: [], // { method, url, userAgent, time }
 	nextSeq: 1,
 };
@@ -44,16 +51,79 @@ function readBody(req) {
 	});
 }
 
-// Webhook ohne Secret — genau das, was die Lese-Endpunkte zurückgeben
+// Fehler-Envelope der echten API: { error: { code, message, requestId } }
+const STATUS_BY_CODE = {
+	VALIDATION_ERROR: 400,
+	UNAUTHORIZED: 401,
+	NOT_FOUND: 404,
+};
+function apiError(res, code, message) {
+	return json(res, STATUS_BY_CODE[code] ?? 400, {
+		error: { code, message, requestId: crypto.randomUUID() },
+	});
+}
+
+// Die Schreib-Endpunkte sind strict: ein vertippter Key darf nicht still
+// verschluckt werden, sondern muss die Anfrage ablehnen.
+function rejectUnknownKeys(res, body, allowed) {
+	const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
+	if (unknown.length) {
+		apiError(res, 'VALIDATION_ERROR', `Unknown field(s): ${unknown.join(', ')}`);
+		return true;
+	}
+	return false;
+}
+
+// Webhook ohne Secret — genau das, was die Lese-Endpunkte zurückgeben.
+// Auf der Wire heißt der Integrationspunkt `type`, nicht `event`.
 function publicWebhook(w) {
 	return {
 		id: w.id,
 		name: w.name,
 		url: w.url,
-		event: w.event,
+		type: w.type,
 		description: w.description,
 		active: true,
 		createdAt: w.createdAt,
+	};
+}
+
+// Beispiel-Zustellungen in den Formaten, die die echte API schickt.
+// call.incoming liegt flach unter `data`, call.during komplett unter `body`.
+function samplePayload(type) {
+	if (type === DURING_CALL_TYPE) {
+		return {
+			body: {
+				webhook_id: 'wh_test',
+				call: {
+					calling_phone_number: '+491701234567',
+					inbound_phone_number: '+4930123456',
+					start_time: new Date().toISOString(),
+					call_id: 'call_1',
+					duration: 42,
+					contact_id: 'c0ffee00-0000-4000-8000-000000000001',
+					messages: [
+						{ role: 'user', content: 'Wie ist der Stand meines Auftrags?' },
+						{ role: 'assistant', content: 'Einen Moment, ich schaue nach.' },
+					],
+					previous_webhook_calls: [],
+				},
+				parameter: { auftragsnummer: 'A-4711' },
+				fields: { kontakt: { customer_number: 'K-4711' } },
+			},
+		};
+	}
+	return {
+		webhook_id: 'wh_test',
+		event: 'call.incoming',
+		data: {
+			call_id: 'call_1',
+			calling_phone_number: '+491701234567',
+			inbound_phone_number: '+4930123456',
+			start_time: new Date().toISOString(),
+			contact: null,
+			fields: { kontakt: { customer_number: 'K-4711' } },
+		},
 	};
 }
 
@@ -117,9 +187,10 @@ const server = http.createServer(async (req, res) => {
 	// Möglichkeit, absichtlich falsch zu signieren.
 	if (path === '/_test/call-webhook' && req.method === 'POST') {
 		const body = await readBody(req);
-		const webhook = Object.values(state.webhooks).find((w) => w.event === (body.event ?? 'call.incoming'));
-		if (!webhook) return json(res, 404, { message: 'no webhook registered' });
-		const result = await deliverSigned(webhook, body.payload ?? { callerNumber: '+491701234567', callId: 'call_1' }, {
+		const type = body.type ?? 'call.incoming';
+		const webhook = Object.values(state.webhooks).find((w) => w.type === type);
+		if (!webhook) return json(res, 404, { message: `no webhook registered for ${type}` });
+		const result = await deliverSigned(webhook, body.payload ?? samplePayload(type), {
 			badSignature: body.badSignature,
 		});
 		return json(res, result.error ? 502 : 200, result);
@@ -157,31 +228,41 @@ const server = http.createServer(async (req, res) => {
 	}
 	if (path === '/webhooks' && req.method === 'POST') {
 		const body = await readBody(req);
-		if (!SYNC_EVENTS.has(body.event)) {
-			return json(res, 400, {
-				error: { code: 'VALIDATION_ERROR', message: `Event ${body.event} is not deliverable by webhook` },
-			});
+		if (rejectUnknownKeys(res, body, ['url', 'type', 'name', 'description', 'headers'])) return;
+		if (!REGISTRABLE_TYPES.has(body.type)) {
+			return apiError(
+				res,
+				'VALIDATION_ERROR',
+				`Unknown webhook type "${body.type}". Registrable webhook types: ${[...REGISTRABLE_TYPES].join(', ')}.`,
+			);
+		}
+		if (body.type === DURING_CALL_TYPE && (!body.name?.trim() || !body.description?.trim())) {
+			return apiError(
+				res,
+				'VALIDATION_ERROR',
+				`name and description are required for type "${DURING_CALL_TYPE}"`,
+			);
 		}
 		const id = crypto.randomUUID();
 		const secret = `whsec_${crypto.randomBytes(16).toString('hex')}`;
 		state.webhooks[id] = {
 			id,
-			event: body.event,
+			type: body.type,
 			url: body.url,
 			name: body.name,
 			description: body.description,
 			secret,
 			createdAt: new Date().toISOString(),
 		};
-		console.log(`  -> registered webhook ${id} for ${body.event}: ${body.url}`);
+		console.log(`  -> registered webhook ${id} for ${body.type}: ${body.url}`);
 		return json(res, 201, { webhook: publicWebhook(state.webhooks[id]), secret });
 	}
 	if (path === '/webhooks' && req.method === 'GET') {
 		const wantedUrl = url.searchParams.get('url');
-		const wantedEvent = url.searchParams.get('event');
+		const wantedType = url.searchParams.get('type');
 		const items = Object.values(state.webhooks)
 			.filter((w) => (wantedUrl ? w.url === wantedUrl : true))
-			.filter((w) => (wantedEvent ? w.event === wantedEvent : true))
+			.filter((w) => (wantedType ? w.type === wantedType : true))
 			.map(publicWebhook);
 		return json(res, 200, { items, totalCount: items.length });
 	}
@@ -205,7 +286,9 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, { secret: webhook.secret });
 		}
 		if (sub === '/test' && req.method === 'POST') {
-			const result = await deliverSigned(webhook, { test: true, event: webhook.event });
+			// Die echte API baut die Testzustellung mit denselben Buildern wie die
+			// Live-Zustellung — gleicher Body, gleiche Signatur.
+			const result = await deliverSigned(webhook, samplePayload(webhook.type));
 			return json(res, 200, result);
 		}
 	}
@@ -231,6 +314,81 @@ const server = http.createServer(async (req, res) => {
 		console.log(`  -> event ${failedMatch[1]} permanently failed after ${body.attempts} attempts: ${body.reason ?? '(no reason)'}`);
 		return json(res, 201, { ok: true });
 	}
+	// Kontakte
+	const CONTACT_FIELDS = [
+		'name',
+		'salutation',
+		'firstName',
+		'lastName',
+		'phone',
+		'email',
+		'address',
+		'contactGroupIds',
+		'fields',
+	];
+	if (path === '/contacts' && req.method === 'POST') {
+		const body = await readBody(req);
+		if (rejectUnknownKeys(res, body, CONTACT_FIELDS)) return;
+		const id = crypto.randomUUID();
+		state.contacts[id] = {
+			id,
+			...body,
+			contactGroupIds: body.contactGroupIds ?? [],
+			fields: body.fields ?? {},
+			createdAt: new Date().toISOString(),
+		};
+		console.log(`  -> created contact ${id}`);
+		return json(res, 201, state.contacts[id]);
+	}
+	const contactMatch = path.match(/^\/contacts\/([^/]+)$/);
+	if (contactMatch && req.method === 'PATCH') {
+		const contact = state.contacts[contactMatch[1]];
+		if (!contact) return apiError(res, 'NOT_FOUND', 'Contact not found');
+		const body = await readBody(req);
+		if (rejectUnknownKeys(res, body, CONTACT_FIELDS)) return;
+		if (!Object.keys(body).length) {
+			return apiError(res, 'VALIDATION_ERROR', 'At least one field is required');
+		}
+		// `fields` merged pro Key, der Rest wird ersetzt
+		const { fields, ...rest } = body;
+		Object.assign(contact, rest);
+		if (fields) contact.fields = { ...contact.fields, ...fields };
+		console.log(`  -> updated contact ${contact.id}: ${Object.keys(body).join(', ')}`);
+		return json(res, 200, contact);
+	}
+	// Aufgaben
+	if (path === '/tasks' && req.method === 'POST') {
+		const body = await readBody(req);
+		if (
+			rejectUnknownKeys(res, body, [
+				'title',
+				'content',
+				'dueAt',
+				'recurrenceRule',
+				'assignment',
+				'command',
+				'onBehalfOfUserId',
+				'projektId',
+				'contactId',
+				'origin',
+			])
+		)
+			return;
+		if (!body.title?.trim()) {
+			return apiError(res, 'VALIDATION_ERROR', 'title is required');
+		}
+		const id = crypto.randomUUID();
+		state.tasks[id] = {
+			id,
+			status: 'open',
+			assignment: { type: 'team' },
+			...body,
+			createdAt: new Date().toISOString(),
+		};
+		console.log(`  -> created task ${id}: ${body.title}`);
+		return json(res, 201, state.tasks[id]);
+	}
+
 	if (path === '/events' && req.method === 'GET') {
 		materializeScheduled();
 		const after = Number(url.searchParams.get('after') ?? 0);

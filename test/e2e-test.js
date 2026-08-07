@@ -1,5 +1,5 @@
 // E2E-Test für n8n-nodes-petra gegen lokales n8n (Port 5678) + Mock-Petra-API (Port 7788).
-// Phase 1 (node e2e-test.js phase1): Setup, Sync-Webhook-Test
+// Phase 1 (node e2e-test.js phase1): Setup, beide synchronen Webhooks, Aktions-Nodes
 // Phase 2 (node e2e-test.js phase2): Events-Workflow anlegen + aktivieren, Events einspeisen
 // Phase 3 (node e2e-test.js phase3): Poll-/Retry-Ergebnisse prüfen
 const fs = require('fs');
@@ -89,9 +89,14 @@ async function phase1() {
 		.filter((t) => t.name.toLowerCase().includes('petra') && !t.name.endsWith('Tool'))
 		.map((t) => t.name);
 	console.log('Gefundene Petra-Node-Typen:', petraTypes);
-	check('Alle 4 Nodes geladen', petraTypes.length === 4, petraTypes.join(', '));
-	const triggerType = petraTypes.find((n) => n.endsWith('.petraTrigger'));
-	const finishType = petraTypes.find((n) => n.endsWith('.petraFinish'));
+	check('Alle 8 Nodes geladen', petraTypes.length === 8, petraTypes.join(', '));
+	const nodeType = (suffix) => petraTypes.find((n) => n.endsWith(`.${suffix}`));
+	const triggerType = nodeType('petraTrigger');
+	const inCallTriggerType = nodeType('petraInCallTrigger');
+	const finishType = nodeType('petraFinish');
+	const contactCreateType = nodeType('petraContactCreate');
+	const contactUpdateType = nodeType('petraContactUpdate');
+	const taskCreateType = nodeType('petraTaskCreate');
 	state.prefix = triggerType.split('.')[0];
 	saveState();
 
@@ -119,7 +124,7 @@ async function phase1() {
 					typeVersion: 1,
 					position: [0, 0],
 					webhookId: crypto.randomUUID(),
-					parameters: { hookType: 'call.incoming', responseMode: 'responseNode' },
+					parameters: { responseMode: 'responseNode' },
 					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
 				},
 				{
@@ -129,13 +134,12 @@ async function phase1() {
 					typeVersion: 1,
 					position: [300, 0],
 					parameters: {
-						contact: {
-							name: 'Max Mustermann',
-							phone: '={{ $json.callerNumber }}',
+						respondTo: 'call.incoming',
+						fieldsKontakt: {
+							values: [{ key: 'customer_number', value: '=K-{{ $json.data.call_id }}' }],
 						},
-						otherData: { values: [{ key: 'data_1', value: 'Wert 1' }] },
-						contentType: 'text',
-						content: '=Anruf {{ $json.callId }}: sei nett',
+						fieldsProzess: { values: [{ key: 'anliegen', value: 'Heizung tropft' }] },
+						instructions: '=Anrufer {{ $json.data.calling_phone_number }} ist Bestandskunde',
 					},
 				},
 			],
@@ -152,47 +156,204 @@ async function phase1() {
 	}
 	console.log('Workflow A:', state.workflowAId);
 
+	// Workflow C: Petra In-Call Trigger -> Kontakt anlegen -> aktualisieren -> Aufgabe -> Antwort.
+	// Die drei Aktions-Nodes hängen bewusst im Anruf-Pfad: ein Durchlauf prüft
+	// Trigger, alle drei API-Aufrufe und die Antwort in einem Stück.
+	if (!state.workflowCId) {
+		const workflow = await api('POST', '/rest/workflows', {
+			name: 'E2E In-Call Tool',
+			nodes: [
+				{
+					id: crypto.randomUUID(),
+					name: 'Petra In-Call Trigger',
+					type: inCallTriggerType,
+					typeVersion: 1,
+					position: [0, 0],
+					webhookId: crypto.randomUUID(),
+					parameters: {
+						toolName: 'Auftragsstatus nachschlagen',
+						toolDescription: 'Sucht den Stand eines Auftrags, wenn der Anrufer danach fragt',
+						responseMode: 'responseNode',
+					},
+					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
+				},
+				{
+					id: crypto.randomUUID(),
+					name: 'Create Petra Contact',
+					type: contactCreateType,
+					typeVersion: 1,
+					position: [220, 0],
+					parameters: {
+						contactFields: {
+							name: 'Max Mustermann',
+							phone: '={{ $json.body.call.calling_phone_number }}',
+						},
+						fields: {
+							values: [
+								{
+									key: 'customer_number',
+									value: '={{ $json.body.fields.kontakt.customer_number }}',
+								},
+							],
+						},
+					},
+					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
+				},
+				{
+					id: crypto.randomUUID(),
+					name: 'Update Petra Contact',
+					type: contactUpdateType,
+					typeVersion: 1,
+					position: [440, 0],
+					parameters: {
+						contactId: '={{ $json.id }}',
+						contactFields: { email: 'max@mustermann.de' },
+					},
+					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
+				},
+				{
+					id: crypto.randomUUID(),
+					name: 'Create Petra Task',
+					type: taskCreateType,
+					typeVersion: 1,
+					position: [660, 0],
+					parameters: {
+						title: 'Rückruf zum Auftrag',
+						assignment: 'team',
+						additionalFields: { contactId: '={{ $json.id }}', origin: 'n8n-e2e' },
+					},
+					credentials: { petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } },
+				},
+				{
+					id: crypto.randomUUID(),
+					name: 'Reply to Petra',
+					type: finishType,
+					typeVersion: 1,
+					position: [880, 0],
+					parameters: {
+						respondTo: 'call.during',
+						messageContent: 'Ihr Auftrag ist in Bearbeitung.',
+						messageType: 'SAY',
+						fieldsKontakt: { values: [{ key: 'customer_number', value: 'K-4711' }] },
+						instructions: 'Kunde ist Premiumkunde — biete den Express-Termin an.',
+					},
+				},
+			],
+			connections: {
+				'Petra In-Call Trigger': {
+					main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]],
+				},
+				'Create Petra Contact': {
+					main: [[{ node: 'Update Petra Contact', type: 'main', index: 0 }]],
+				},
+				'Update Petra Contact': {
+					main: [[{ node: 'Create Petra Task', type: 'main', index: 0 }]],
+				},
+				'Create Petra Task': { main: [[{ node: 'Reply to Petra', type: 'main', index: 0 }]] },
+			},
+			settings: {},
+			active: false,
+		});
+		state.workflowCId = workflow.data?.id ?? workflow.id;
+		saveState();
+	}
+	console.log('Workflow C:', state.workflowCId);
+
 	// Aktivieren
 	await activateWorkflow(state.workflowAId);
+	await activateWorkflow(state.workflowCId);
 
 	// Registrierung am Mock prüfen
 	const mockState = await mock('GET', '/_test/state');
 	const registered = Object.values(mockState.webhooks);
-	check('Webhook bei Petra registriert', registered.length === 1, JSON.stringify(registered));
+	check(
+		'Beide Webhooks bei Petra registriert (call.incoming + call.during)',
+		registered.length === 2 &&
+			registered.some((w) => w.type === 'call.incoming') &&
+			registered.some((w) => w.type === 'call.during'),
+		JSON.stringify(registered.map((w) => w.type)),
+	);
+	const duringHook = registered.find((w) => w.type === 'call.during');
+	check(
+		'Werkzeug trägt Name und Beschreibung für Petra',
+		duringHook?.name === 'Auftragsstatus nachschlagen' &&
+			duringHook?.description?.startsWith('Sucht den Stand'),
+		JSON.stringify({ name: duringHook?.name, description: duringHook?.description }),
+	);
 	const userAgents = [...new Set(mockState.requestLog.map((r) => r.userAgent))];
 	check(
 		'User-Agent gesetzt',
-		userAgents.some((ua) => ua && ua.startsWith('n8n-nodes-petra/')),
+		userAgents.some((ua) => ua && ua.startsWith('n8n-nodes-hallopetra/')),
 		userAgents.join(' | '),
 	);
 
-	// Synchroner Aufruf mit korrekter Signatur
-	const call = await mock('POST', '/_test/call-webhook', {
-		event: 'call.incoming',
-		payload: { callerNumber: '+491701234567', callId: 'call_1' },
-	});
-	console.log('Sync-Antwort:', JSON.stringify(call));
+	// Synchroner Aufruf mit korrekter Signatur — Standard-Payload aus dem Mock
+	const call = await mock('POST', '/_test/call-webhook', { type: 'call.incoming' });
+	console.log('Sync-Antwort (call.incoming):', JSON.stringify(call));
 	let responseBody = {};
 	try {
 		responseBody = JSON.parse(call.body);
 	} catch {}
-	check('Sync-Aufruf: Status 200', call.status === 200, `status=${call.status}`);
+	check('call.incoming: Status 200', call.status === 200, `status=${call.status}`);
 	check(
-		'Sync-Aufruf: Antwort im Petra-Agent-Format',
-		responseBody.contact?.contact_data_name === 'Max Mustermann' &&
-			responseBody.contact?.contact_data_phone === '+491701234567' &&
-			responseBody.other_data?.data_1 === 'Wert 1' &&
-			responseBody.content === 'Anruf call_1: sei nett',
+		'call.incoming: Antwort ist fields + instructions',
+		responseBody.fields?.kontakt?.customer_number === 'K-call_1' &&
+			responseBody.fields?.prozess?.anliegen === 'Heizung tropft' &&
+			responseBody.instructions === 'Anrufer +491701234567 ist Bestandskunde' &&
+			responseBody.message === undefined,
 		call.body,
 	);
 
 	// Aufruf mit falscher Signatur -> 401
 	const badCall = await mock('POST', '/_test/call-webhook', {
-		event: 'call.incoming',
-		payload: { callerNumber: 'x' },
+		type: 'call.incoming',
 		badSignature: true,
 	});
 	check('Falsche Signatur wird abgelehnt (401)', badCall.status === 401, `status=${badCall.status}`);
+
+	// In-Call-Werkzeug: derselbe Weg, anderer Envelope und anderes Antwortformat
+	const duringCall = await mock('POST', '/_test/call-webhook', { type: 'call.during' });
+	console.log('Sync-Antwort (call.during):', JSON.stringify(duringCall));
+	let duringBody = {};
+	try {
+		duringBody = JSON.parse(duringCall.body);
+	} catch {}
+	check('call.during: Status 200', duringCall.status === 200, `status=${duringCall.status}`);
+	check(
+		'call.during: Antwort trägt message, fields und instructions',
+		duringBody.message?.content === 'Ihr Auftrag ist in Bearbeitung.' &&
+			duringBody.message?.message_type === 'SAY' &&
+			duringBody.fields?.kontakt?.customer_number === 'K-4711' &&
+			duringBody.instructions?.startsWith('Kunde ist Premiumkunde'),
+		duringCall.body,
+	);
+
+	// Die drei Aktions-Nodes liefen im selben Durchlauf
+	const afterCall = await mock('GET', '/_test/state');
+	const contacts = Object.values(afterCall.contacts);
+	const tasks = Object.values(afterCall.tasks);
+	check(
+		'Kontakt angelegt — mit Telefonnummer und Feld aus dem Anruf',
+		contacts.length === 1 &&
+			contacts[0].phone === '+491701234567' &&
+			contacts[0].fields?.customer_number === 'K-4711',
+		JSON.stringify(contacts),
+	);
+	check(
+		'Kontakt aktualisiert — E-Mail ergänzt, Feld aus dem Anlegen erhalten',
+		contacts[0]?.email === 'max@mustermann.de' &&
+			contacts[0]?.fields?.customer_number === 'K-4711',
+		JSON.stringify(contacts[0]),
+	);
+	check(
+		'Aufgabe erstellt — am Kontakt, mit Herkunft und Team-Zuweisung',
+		tasks.length === 1 &&
+			tasks[0].title === 'Rückruf zum Auftrag' &&
+			tasks[0].contactId === contacts[0]?.id &&
+			tasks[0].origin === 'n8n-e2e' &&
+			tasks[0].assignment?.type === 'team',
+		JSON.stringify(tasks),
+	);
 }
 
 async function phase2() {

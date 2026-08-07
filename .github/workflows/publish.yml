@@ -57,9 +57,10 @@ name: Publish
 on:
   push:
     tags:
-      # Matches 0.1.0, 1.2.3, 2.0.0-rc.1, etc.
-      # See "TAG CONVENTION" above if you prefer tags with a "v" prefix.
+      # Matches 0.1.0, 1.2.3, 2.0.0-rc.1 as well as the v-prefixed forms
+      # (v0.1.0, …) — whichever `npm run release` produces, the publish runs.
       - '*.*.*'
+      - 'v*.*.*'
 
 jobs:
   publish:

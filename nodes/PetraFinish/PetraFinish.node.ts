@@ -5,9 +5,60 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { jsonParse, NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 
 const PETRA_TRIGGER_NODE_TYPE = '@hallopetra/n8n-nodes-hallopetra.petraTrigger';
+const PETRA_IN_CALL_TRIGGER_NODE_TYPE = '@hallopetra/n8n-nodes-hallopetra.petraInCallTrigger';
+
+/** Which trigger a given `respondTo` value belongs to, and how to name it in an error. */
+const RESPOND_TO_TRIGGER = {
+	'call.incoming': {
+		nodeType: PETRA_TRIGGER_NODE_TYPE,
+		displayName: 'Petra Incoming Call Trigger',
+	},
+	'call.during': {
+		nodeType: PETRA_IN_CALL_TRIGGER_NODE_TYPE,
+		displayName: 'Petra In-Call Trigger',
+	},
+} as const;
+
+type RespondTo = keyof typeof RESPOND_TO_TRIGGER;
+
+/** A key-value fixedCollection, used for each group of the `fields` envelope. */
+function fieldsCollection(name: string, displayName: string, group: string) {
+	return {
+		displayName,
+		name,
+		type: 'fixedCollection' as const,
+		typeOptions: {
+			multipleValues: true,
+		},
+		placeholder: 'Add field',
+		default: {},
+		description: `Key-value fields that HalloPetra persists (fields.${group} in the response)`,
+		options: [
+			{
+				displayName: 'Field',
+				name: 'values',
+				values: [
+					{
+						displayName: 'Key',
+						name: 'key',
+						type: 'string' as const,
+						default: '',
+						description: 'Field name in snake_case, e.g. "customer_number"',
+					},
+					{
+						displayName: 'Value',
+						name: 'value',
+						type: 'string' as const,
+						default: '',
+					},
+				],
+			},
+		],
+	};
+}
 
 export class PetraFinish implements INodeType {
 	description: INodeTypeDescription = {
@@ -17,9 +68,9 @@ export class PetraFinish implements INodeType {
 		group: ['transform'],
 		version: 1,
 		usableAsTool: true,
-		subtitle: 'respond to HalloPetra',
+		subtitle: '={{$parameter["respondTo"]}}',
 		description:
-			'Sends what you looked up back to Petra, in the format Petra expects (contact data, additional data, content). Terminal node without outputs — to run additional steps after responding, branch off before this node.',
+			'Sends what you looked up back to Petra, in the format Petra expects. Answers either the Petra Incoming Call Trigger or the Petra In-Call Trigger — pick which one below. Terminal node without outputs: to run additional steps after responding, branch off before this node.',
 		defaults: {
 			name: 'Reply to Petra',
 		},
@@ -27,224 +78,79 @@ export class PetraFinish implements INodeType {
 		outputs: [],
 		properties: [
 			{
-				displayName: 'Contact',
-				name: 'contact',
-				type: 'collection',
-				placeholder: 'Add contact field',
-				default: {},
-				description: 'Contact data Petra has available during the call',
-				options: [
-					{
-						displayName: 'Address',
-						name: 'address',
-						type: 'string',
-						default: '',
-						description: 'Postal address of the contact, e.g. "Musterstraße 1, 12345 Musterstadt"',
-					},
-					{
-						displayName: 'Email',
-						name: 'email',
-						type: 'string',
-						placeholder: 'name@email.com',
-						default: '',
-						description: 'Email address of the contact',
-					},
-					{
-						displayName: 'Name',
-						name: 'name',
-						type: 'string',
-						default: '',
-						description: 'Full name of the contact, e.g. "Max Mustermann"',
-					},
-					{
-						displayName: 'Phone',
-						name: 'phone',
-						type: 'string',
-						default: '',
-						description: 'Phone number of the contact, e.g. "+491234567890"',
-					},
-				],
-			},
-			{
-				displayName: 'Other Data',
-				name: 'otherData',
-				type: 'fixedCollection',
-				typeOptions: {
-					multipleValues: true,
-				},
-				placeholder: 'Add data field',
-				default: {},
-				description: 'Additional key-value data Petra has available during the call',
-				options: [
-					{
-						displayName: 'Data',
-						name: 'values',
-						values: [
-							{
-								displayName: 'Key',
-								name: 'key',
-								type: 'string',
-								default: '',
-								description: 'Name of the data field, e.g. "data_1"',
-							},
-							{
-								displayName: 'Value',
-								name: 'value',
-								type: 'string',
-								default: '',
-								description: 'Value of the data field',
-							},
-						],
-					},
-				],
-			},
-			{
-				displayName: 'Persist Fields (Kontakt)',
-				name: 'fieldsKontakt',
-				type: 'fixedCollection',
-				typeOptions: {
-					multipleValues: true,
-				},
-				placeholder: 'Add field',
-				default: {},
-				description:
-					'Key-value fields that HalloPetra persists on the contact (fields.kontakt in the response)',
-				options: [
-					{
-						displayName: 'Field',
-						name: 'values',
-						values: [
-							{
-								displayName: 'Key',
-								name: 'key',
-								type: 'string',
-								default: '',
-							},
-							{
-								displayName: 'Value',
-								name: 'value',
-								type: 'string',
-								default: '',
-							},
-						],
-					},
-				],
-			},
-			{
-				displayName: 'Persist Fields (Prozess)',
-				name: 'fieldsProzess',
-				type: 'fixedCollection',
-				typeOptions: {
-					multipleValues: true,
-				},
-				placeholder: 'Add field',
-				default: {},
-				description:
-					'Key-value fields that HalloPetra persists on the process (fields.prozess in the response)',
-				options: [
-					{
-						displayName: 'Field',
-						name: 'values',
-						values: [
-							{
-								displayName: 'Key',
-								name: 'key',
-								type: 'string',
-								default: '',
-							},
-							{
-								displayName: 'Value',
-								name: 'value',
-								type: 'string',
-								default: '',
-							},
-						],
-					},
-				],
-			},
-			{
-				displayName: 'Persist Fields (Projekt)',
-				name: 'fieldsProjekt',
-				type: 'fixedCollection',
-				typeOptions: {
-					multipleValues: true,
-				},
-				placeholder: 'Add field',
-				default: {},
-				description:
-					'Key-value fields that HalloPetra persists on the project (fields.projekt in the response)',
-				options: [
-					{
-						displayName: 'Field',
-						name: 'values',
-						values: [
-							{
-								displayName: 'Key',
-								name: 'key',
-								type: 'string',
-								default: '',
-							},
-							{
-								displayName: 'Value',
-								name: 'value',
-								type: 'string',
-								default: '',
-							},
-						],
-					},
-				],
-			},
-			{
-				displayName: 'Content',
-				name: 'contentType',
+				displayName: 'Respond To',
+				name: 'respondTo',
 				type: 'options',
 				options: [
 					{
-						name: 'None',
-						value: 'none',
-						description: 'Send no content field at all',
+						name: 'Incoming Call',
+						value: 'call.incoming',
+						description:
+							'Answers a "Petra Incoming Call Trigger" — what Petra knows before the greeting',
 					},
 					{
-						name: 'Text',
-						value: 'text',
-						description: 'Content is free-form text',
-					},
-					{
-						name: 'JSON',
-						value: 'json',
-						description: 'Content is a JSON structure',
+						name: 'During a Call',
+						value: 'call.during',
+						description:
+							'Answers a "Petra In-Call Trigger" — what Petra says and learns mid-conversation',
 					},
 				],
-				default: 'none',
-				description:
-					'Content Petra has available during the call. With "None" the response contains no content field.',
+				default: 'call.incoming',
+				required: true,
+				description: 'Which trigger this workflow started from',
 			},
 			{
-				displayName: 'Text',
-				name: 'content',
+				displayName: 'Message',
+				name: 'messageContent',
 				type: 'string',
 				typeOptions: {
-					rows: 4,
+					rows: 3,
 				},
 				displayOptions: {
 					show: {
-						contentType: ['text'],
+						respondTo: ['call.during'],
 					},
 				},
 				default: '',
-				description: 'Free-form content Petra has available during the call, in plain language',
+				description:
+					'What Petra should say next, in plain language. Leave empty and set the message type to "Silent" to add context without an announcement.',
 			},
 			{
-				displayName: 'JSON',
-				name: 'contentJson',
-				type: 'json',
+				displayName: 'Message Type',
+				name: 'messageType',
+				type: 'options',
 				displayOptions: {
 					show: {
-						contentType: ['json'],
+						respondTo: ['call.during'],
 					},
 				},
-				default: '{}',
-				description: 'JSON content Petra has available during the call',
+				options: [
+					{
+						name: 'Say',
+						value: 'SAY',
+						description: 'Petra speaks the message to the caller',
+					},
+					{
+						name: 'Silent',
+						value: 'SILENT',
+						description: 'No announcement — the message is only context for Petra',
+					},
+				],
+				default: 'SAY',
+				description: 'Whether Petra says the message out loud',
+			},
+			fieldsCollection('fieldsKontakt', 'Persist Fields (Kontakt)', 'kontakt'),
+			fieldsCollection('fieldsProzess', 'Persist Fields (Prozess)', 'prozess'),
+			{
+				displayName: 'Instructions',
+				name: 'instructions',
+				type: 'string',
+				typeOptions: {
+					rows: 3,
+				},
+				default: '',
+				description:
+					'How Petra should handle this call, in plain language, e.g. "Customer has an open invoice — do not raise it, note the request and pass it to accounting"',
 			},
 			{
 				displayName: 'Options',
@@ -270,17 +176,29 @@ export class PetraFinish implements INodeType {
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
+		const respondTo = this.getNodeParameter('respondTo', 0) as RespondTo;
+		const expected = RESPOND_TO_TRIGGER[respondTo];
+
 		const parentNodes = this.getParentNodes(this.getNode().name);
-		const hasPetraTrigger = parentNodes.some(
-			(node) => node.type === PETRA_TRIGGER_NODE_TYPE && !node.disabled,
+		const activeTriggers = parentNodes.filter(
+			(node) =>
+				!node.disabled &&
+				(node.type === PETRA_TRIGGER_NODE_TYPE ||
+					node.type === PETRA_IN_CALL_TRIGGER_NODE_TYPE),
 		);
-		if (!hasPetraTrigger) {
+		if (!activeTriggers.length) {
+			throw new NodeOperationError(this.getNode(), 'No Petra trigger found in the workflow', {
+				description: `Add a "${expected.displayName}" to this workflow and set its "Respond" parameter to "Using Reply to Petra Node"`,
+			});
+		}
+		// A response built for the wrong phase is silently useless — Petra reads
+		// `message` only during a call, and never sends one before the greeting.
+		if (!activeTriggers.some((node) => node.type === expected.nodeType)) {
 			throw new NodeOperationError(
 				this.getNode(),
-				'No Petra Incoming Call Trigger found in the workflow',
+				`"Respond To" is set to "${respondTo}", but this workflow starts from a different Petra trigger`,
 				{
-					description:
-						'Add a "Petra Incoming Call Trigger" to this workflow and set its "Respond" parameter to "Using Reply to Petra Node"',
+					description: `Either add a "${expected.displayName}", or change "Respond To" to match the trigger this workflow actually uses`,
 				},
 			);
 		}
@@ -295,37 +213,22 @@ export class PetraFinish implements INodeType {
 			});
 		}
 
-		const contactInput = this.getNodeParameter('contact', 0, {}) as IDataObject;
-		const contact: IDataObject = {};
-		if (contactInput.name) contact.contact_data_name = contactInput.name;
-		if (contactInput.email) contact.contact_data_email = contactInput.email;
-		if (contactInput.phone) contact.contact_data_phone = contactInput.phone;
-		if (contactInput.address) contact.contact_data_address = contactInput.address;
-
-		const otherDataInput = this.getNodeParameter('otherData.values', 0, []) as Array<{
-			key: string;
-			value: string;
-		}>;
-		const otherData: IDataObject = {};
-		for (const { key, value } of otherDataInput) {
-			if (key) otherData[key] = value;
-		}
-
 		// Only sections that actually contain data end up in the response
 		const body: IDataObject = {};
-		if (Object.keys(contact).length) {
-			body.contact = contact;
-		}
-		if (Object.keys(otherData).length) {
-			body.other_data = otherData;
+
+		if (respondTo === 'call.during') {
+			body.message = {
+				content: this.getNodeParameter('messageContent', 0, '') as string,
+				message_type: this.getNodeParameter('messageType', 0, 'SAY') as string,
+			};
 		}
 
-		// fields envelope: values HalloPetra persists on Kontakt/Prozess/Projekt
+		// fields envelope: values HalloPetra persists on Kontakt/Prozess.
+		// A live call carries no Projekt group — the server drops it.
 		const fields: IDataObject = {};
 		for (const [parameter, key] of [
 			['fieldsKontakt', 'kontakt'],
 			['fieldsProzess', 'prozess'],
-			['fieldsProjekt', 'projekt'],
 		] as const) {
 			const entries = this.getNodeParameter(`${parameter}.values`, 0, []) as Array<{
 				key: string;
@@ -343,17 +246,9 @@ export class PetraFinish implements INodeType {
 			body.fields = fields;
 		}
 
-		const contentType = this.getNodeParameter('contentType', 0) as string;
-		if (contentType === 'json') {
-			const rawContent = this.getNodeParameter('contentJson', 0) as IDataObject | string;
-			body.content =
-				typeof rawContent === 'string'
-					? jsonParse<IDataObject>(rawContent, {
-							errorMessage: 'Content (JSON) must be valid JSON',
-						})
-					: rawContent;
-		} else if (contentType === 'text') {
-			body.content = this.getNodeParameter('content', 0, '') as string;
+		const instructions = this.getNodeParameter('instructions', 0, '') as string;
+		if (instructions) {
+			body.instructions = instructions;
 		}
 
 		const options = this.getNodeParameter('options', 0, {}) as IDataObject;

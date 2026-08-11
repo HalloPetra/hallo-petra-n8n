@@ -59,7 +59,10 @@ export class PetraFormTrigger implements INodeType {
 				name: 'default',
 				httpMethod: 'POST',
 				// Fire-and-forget: acknowledge at once, nothing reads the response.
+				// `responseData` has to be stated — left out, n8n defaults it to
+				// `firstEntryJson` and writes that literal string as the response body.
 				responseMode: 'onReceived',
+				responseData: 'noData',
 				path: 'webhook',
 			},
 		],

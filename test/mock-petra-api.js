@@ -1,42 +1,41 @@
 // Mock der HalloPetra-Integrations-API laut Kontrakt im README.
 // Start: node mock-petra-api.js  → http://localhost:7788
-// Test-Helfer: POST /_test/events (Event einspeisen), GET /_test/state (Zustand ansehen)
+// Test-Helfer: GET /_test/state (Zustand ansehen), POST /_test/call-webhook (Zustellung auslösen)
 const http = require('http');
 const crypto = require('crypto');
 
 const PORT = 7788;
 const API_KEY = 'test-key';
 
-// Registrierbar sind nur die Webhooks, auf deren Antwort Petra im Anruf wartet:
-// call.incoming vor der Begrüßung, call.during als Werkzeug mitten im Gespräch.
-// Alles andere kommt aus dem Feed (GET /events) und wird hier mit 400 abgelehnt.
-const REGISTRABLE_TYPES = new Set(['call.incoming', 'call.during']);
-// call.during ohne Name und Beschreibung wäre für Petra unsichtbar — sie liest
-// beides, um zu entscheiden, ob sie das Werkzeug aufruft.
-const DURING_CALL_TYPE = 'call.during';
+// Die vier Ereignisse, für die sich ein Workflow registrieren kann. Alles andere
+// lehnt POST /webhooks mit 400 ab.
+const EVENTS = {
+	'call.incoming': { sync: true },
+	'call.tool': { sync: true },
+	// Beide asynchronen Ereignisse lassen sich eingrenzen — auf Abläufe bzw.
+	// Formulare. Das Feld gehört jeweils genau zu einem Ereignis.
+	'call.finished': { sync: false, scopeField: 'ablauf_ids' },
+	form_submission: { sync: false, scopeField: 'form_ids' },
+};
+const SCOPE_FIELDS = ['ablauf_ids', 'form_ids'];
+
+// Feste IDs, damit der E2E-Test gezielt auswählen kann
+const ABLAEUFE = [
+	{ id: '0c4f8a6e-2b91-4d37-8e5a-6f1d3c7b9a02', title: 'Notdienst-Anfrage aufnehmen', status: 'enabled' },
+	{ id: '1d5e9b7f-3ca2-4e48-9f6b-7a2e4d8c0b13', title: 'Termin vereinbaren', status: 'enabled' },
+	{ id: '2e6fac80-4db3-4f59-a07c-8b3f5e9d1c24', title: 'Alter Ablauf', status: 'disabled' },
+];
+const FORMS = [
+	{ id: '3f70bd91-5ec4-4a6a-b18d-9c4a6f0e2d35', title: 'Rückrufbitte', slug: 'rueckrufbitte' },
+	{ id: '4a81cea2-6fd5-4b7b-c29e-0d5b7a1f3e46', title: 'Schadensmeldung', slug: 'schadensmeldung' },
+];
 
 const state = {
-	webhooks: {}, // id -> { id, type, url, name, description, secret, createdAt }
-	events: [], // { seq, id, type, occurredAt, attempt, payload }
-	scheduled: [], // Redeliveries, die erst nach dueAt in den Feed wandern
-	redeliverLog: [], // { id, attempt, delaySeconds }
-	failedEvents: [], // { id, attempts, reason }
+	webhooks: {}, // id -> { id, event, url, name, description, ablauf_ids?, form_ids?, secret, createdAt }
 	contacts: {}, // id -> Kontakt laut POST /contacts
 	tasks: {}, // id -> Aufgabe laut POST /tasks
 	requestLog: [], // { method, url, userAgent, time }
-	nextSeq: 1,
 };
-
-// Fällige Redeliveries in den Feed übernehmen (Sequenznummer erst jetzt vergeben,
-// damit der Cursor monoton bleibt)
-function materializeScheduled() {
-	const now = Date.now();
-	const due = state.scheduled.filter((s) => s.dueAt <= now);
-	state.scheduled = state.scheduled.filter((s) => s.dueAt > now);
-	for (const { event } of due) {
-		state.events.push({ ...event, seq: state.nextSeq++ });
-	}
-}
 
 function json(res, code, body) {
 	res.writeHead(code, { 'content-type': 'application/json' });
@@ -75,30 +74,35 @@ function rejectUnknownKeys(res, body, allowed) {
 }
 
 // Webhook ohne Secret — genau das, was die Lese-Endpunkte zurückgeben.
-// Auf der Wire heißt der Integrationspunkt `type`, nicht `event`.
+// Die Eingrenzung fehlt bei unternehmensweiten Registrierungen ganz.
 function publicWebhook(w) {
-	return {
+	const out = {
 		id: w.id,
 		name: w.name,
 		url: w.url,
-		type: w.type,
+		event: w.event,
 		description: w.description,
 		active: true,
 		createdAt: w.createdAt,
 	};
+	for (const field of SCOPE_FIELDS) {
+		if (w[field]?.length) out[field] = w[field];
+	}
+	return out;
 }
 
 // Beispiel-Zustellungen in den Formaten, die die echte API schickt.
-// call.incoming liegt flach unter `data`, call.during komplett unter `body`.
-function samplePayload(type) {
-	if (type === DURING_CALL_TYPE) {
+function samplePayload(event) {
+	const now = new Date().toISOString();
+	if (event === 'call.tool') {
+		// Als einziges Ereignis komplett unter `body` verschachtelt
 		return {
 			body: {
 				webhook_id: 'wh_test',
 				call: {
 					calling_phone_number: '+491701234567',
 					inbound_phone_number: '+4930123456',
-					start_time: new Date().toISOString(),
+					start_time: now,
 					call_id: 'call_1',
 					duration: 42,
 					contact_id: 'c0ffee00-0000-4000-8000-000000000001',
@@ -113,6 +117,51 @@ function samplePayload(type) {
 			},
 		};
 	}
+	if (event === 'call.finished') {
+		return {
+			webhook_id: 'wh_test',
+			event,
+			data: {
+				id: 'call_1',
+				duration: 184,
+				phone: '+491701234567',
+				topic: 'Heizung ausgefallen',
+				summary: 'Herr Mustermann meldet einen Totalausfall seiner Gasheizung.',
+				messages: [
+					{ role: 'assistant', content: 'Mustermann Haustechnik, Sie sprechen mit Petra.' },
+					{ role: 'user', content: 'Meine Heizung ist ausgefallen.', secondsFromStart: 4.2 },
+				],
+				collected_data: { name: 'Max Mustermann', issue_information: 'Fehlercode F28' },
+				contact_data: {
+					id: 'c0ffee00-0000-4000-8000-000000000001',
+					name: 'Max Mustermann',
+					phone: '+491701234567',
+				},
+				email_send_to: null,
+				forwarded_to: null,
+				main_task_id: ABLAEUFE[0].id,
+				previous_webhook_calls: [],
+				fields: { kontakt: { customer_number: 'K-4711' }, prozess: {}, projekt: {} },
+			},
+		};
+	}
+	if (event === 'form_submission') {
+		return {
+			event,
+			form: { id: FORMS[0].id, title: FORMS[0].title, slug: FORMS[0].slug },
+			submission: {
+				submitted_at: now,
+				data: { name: 'Max Mustermann', anliegen: 'Bitte um Rückruf' },
+			},
+			contact: {
+				id: 'c0ffee00-0000-4000-8000-000000000001',
+				name: 'Max Mustermann',
+				phone: '+491701234567',
+				email: 'max@example.de',
+			},
+			call: { id: 'call_1', topic: 'Rückrufbitte', summary: 'Kunde bittet um Rückruf', date: now },
+		};
+	}
 	return {
 		webhook_id: 'wh_test',
 		event: 'call.incoming',
@@ -120,7 +169,7 @@ function samplePayload(type) {
 			call_id: 'call_1',
 			calling_phone_number: '+491701234567',
 			inbound_phone_number: '+4930123456',
-			start_time: new Date().toISOString(),
+			start_time: now,
 			contact: null,
 			fields: { kontakt: { customer_number: 'K-4711' } },
 		},
@@ -166,31 +215,18 @@ const server = http.createServer(async (req, res) => {
 	console.log(`${req.method} ${req.url} ua=${req.headers['user-agent']}`);
 
 	// Test-Helfer ohne Auth
-	if (path === '/_test/events' && req.method === 'POST') {
-		const body = await readBody(req);
-		const event = {
-			seq: state.nextSeq++,
-			id: body.id ?? `evt_${state.nextSeq}`,
-			type: body.type ?? 'call.finished',
-			occurredAt: new Date().toISOString(),
-			attempt: 1,
-			payload: body.payload ?? { note: 'test event' },
-		};
-		state.events.push(event);
-		return json(res, 201, event);
-	}
 	if (path === '/_test/state' && req.method === 'GET') {
 		return json(res, 200, state);
 	}
-	// Helfer: signierten Call an einen registrierten Webhook schicken — dieselbe
+	// Signierten Call an einen registrierten Webhook schicken — dieselbe
 	// Zustellung wie POST /webhooks/{id}/test, nur ohne Auth und mit der
 	// Möglichkeit, absichtlich falsch zu signieren.
 	if (path === '/_test/call-webhook' && req.method === 'POST') {
 		const body = await readBody(req);
-		const type = body.type ?? 'call.incoming';
-		const webhook = Object.values(state.webhooks).find((w) => w.type === type);
-		if (!webhook) return json(res, 404, { message: `no webhook registered for ${type}` });
-		const result = await deliverSigned(webhook, body.payload ?? samplePayload(type), {
+		const event = body.event ?? 'call.incoming';
+		const webhook = Object.values(state.webhooks).find((w) => w.event === event);
+		if (!webhook) return json(res, 404, { message: `no webhook registered for ${event}` });
+		const result = await deliverSigned(webhook, body.payload ?? samplePayload(event), {
 			badSignature: body.badSignature,
 		});
 		return json(res, result.error ? 502 : 200, result);
@@ -201,80 +237,94 @@ const server = http.createServer(async (req, res) => {
 		return json(res, 401, { message: 'Unauthorized' });
 	}
 
-	if (path === '/events/types' && req.method === 'GET') {
-		return json(res, 200, {
-			// `label` ist der deutsche, operator-sichtbare Name aus der echten Registry
-			types: [
-				{
-					name: 'call.incoming',
-					label: 'Vor einem Anruf',
-					mode: 'sync',
-					description: 'Fired synchronously when a call reaches Petra',
-				},
-				{
-					name: 'call.finished',
-					label: 'Nach einem Anruf',
-					mode: 'async',
-					description: 'Fired after a call ends',
-				},
-				{
-					name: 'contact.created',
-					label: 'Neuer Kontakt',
-					mode: 'async',
-					description: 'Fired when a new contact is created',
-				},
-			],
-		});
+	// Auswahlquellen für die Eingrenzung der asynchronen Trigger
+	if (path === '/ablaeufe' && req.method === 'GET') {
+		return json(res, 200, { ablaeufe: ABLAEUFE });
 	}
+	if (path === '/forms' && req.method === 'GET') {
+		return json(res, 200, { forms: FORMS });
+	}
+
 	if (path === '/webhooks' && req.method === 'POST') {
 		const body = await readBody(req);
-		if (rejectUnknownKeys(res, body, ['url', 'type', 'name', 'description', 'headers'])) return;
-		if (!REGISTRABLE_TYPES.has(body.type)) {
+		if (
+			rejectUnknownKeys(res, body, [
+				'url',
+				'event',
+				'name',
+				'description',
+				'headers',
+				...SCOPE_FIELDS,
+			])
+		)
+			return;
+		const definition = EVENTS[body.event];
+		if (!definition) {
 			return apiError(
 				res,
 				'VALIDATION_ERROR',
-				`Unknown webhook type "${body.type}". Registrable webhook types: ${[...REGISTRABLE_TYPES].join(', ')}.`,
+				`Unknown event "${body.event}". Registrable events: ${Object.keys(EVENTS).join(', ')}.`,
 			);
 		}
-		if (body.type === DURING_CALL_TYPE && (!body.name?.trim() || !body.description?.trim())) {
-			return apiError(
-				res,
-				'VALIDATION_ERROR',
-				`name and description are required for type "${DURING_CALL_TYPE}"`,
-			);
+		// Eine Eingrenzung gehört immer zu genau einem Ereignis
+		for (const field of SCOPE_FIELDS) {
+			if (body[field] === undefined) continue;
+			if (field !== definition.scopeField) {
+				return apiError(res, 'VALIDATION_ERROR', `${field} is not allowed for "${body.event}"`);
+			}
+			if (!Array.isArray(body[field]) || !body[field].length || body[field].length > 20) {
+				return apiError(res, 'VALIDATION_ERROR', `${field} must hold between 1 and 20 ids`);
+			}
+			const known = new Set((field === 'ablauf_ids' ? ABLAEUFE : FORMS).map((row) => row.id));
+			const unknown = body[field].filter((id) => !known.has(id));
+			if (unknown.length) {
+				return apiError(res, 'VALIDATION_ERROR', `Unknown ${field}: ${unknown.join(', ')}`);
+			}
 		}
 		const id = crypto.randomUUID();
 		const secret = `whsec_${crypto.randomBytes(16).toString('hex')}`;
 		state.webhooks[id] = {
 			id,
-			type: body.type,
+			event: body.event,
 			url: body.url,
 			name: body.name,
 			description: body.description,
+			ablauf_ids: body.ablauf_ids,
+			form_ids: body.form_ids,
 			secret,
 			createdAt: new Date().toISOString(),
 		};
-		console.log(`  -> registered webhook ${id} for ${body.type}: ${body.url}`);
+		const scope = definition.scopeField && body[definition.scopeField];
+		console.log(
+			`  -> registered webhook ${id} for ${body.event}${scope ? ` scoped to ${scope.length}` : ''}: ${body.url}`,
+		);
 		return json(res, 201, { webhook: publicWebhook(state.webhooks[id]), secret });
 	}
 	if (path === '/webhooks' && req.method === 'GET') {
 		const wantedUrl = url.searchParams.get('url');
-		const wantedType = url.searchParams.get('type');
+		const wantedEvent = url.searchParams.get('event');
 		const items = Object.values(state.webhooks)
 			.filter((w) => (wantedUrl ? w.url === wantedUrl : true))
-			.filter((w) => (wantedType ? w.type === wantedType : true))
+			.filter((w) => (wantedEvent ? w.event === wantedEvent : true))
 			.map(publicWebhook);
 		return json(res, 200, { items, totalCount: items.length });
 	}
-	// GET/DELETE /webhooks/{id}, GET /webhooks/{id}/secret, POST /webhooks/{id}/test
+	// GET/PATCH/DELETE /webhooks/{id}, GET /webhooks/{id}/secret, POST /webhooks/{id}/test
 	const webhookMatch = path.match(/^\/webhooks\/([^/]+)(\/secret|\/test)?$/);
 	if (webhookMatch) {
 		const webhook = state.webhooks[webhookMatch[1]];
-		if (!webhook) return json(res, 404, { message: 'Webhook not found' });
+		if (!webhook) return apiError(res, 'NOT_FOUND', 'Webhook not found');
 		const sub = webhookMatch[2];
 
 		if (!sub && req.method === 'GET') {
 			// Die echte API antwortet mit dem Webhook selbst, nicht mit einem Wrapper
+			return json(res, 200, publicWebhook(webhook));
+		}
+		if (!sub && req.method === 'PATCH') {
+			const body = await readBody(req);
+			// Weder das Ereignis noch die Eingrenzung sind änderbar
+			if (rejectUnknownKeys(res, body, ['url', 'name', 'description', 'active', 'headers'])) return;
+			Object.assign(webhook, body);
 			return json(res, 200, publicWebhook(webhook));
 		}
 		if (!sub && req.method === 'DELETE') {
@@ -288,31 +338,9 @@ const server = http.createServer(async (req, res) => {
 		if (sub === '/test' && req.method === 'POST') {
 			// Die echte API baut die Testzustellung mit denselben Buildern wie die
 			// Live-Zustellung — gleicher Body, gleiche Signatur.
-			const result = await deliverSigned(webhook, samplePayload(webhook.type));
+			const result = await deliverSigned(webhook, samplePayload(webhook.event));
 			return json(res, 200, result);
 		}
-	}
-	// Redeliver: Event erscheint nach delaySeconds erneut im Feed
-	const redeliverMatch = path.match(/^\/events\/([^/]+)\/redeliver$/);
-	if (redeliverMatch && req.method === 'POST') {
-		const body = await readBody(req);
-		const original = [...state.events].reverse().find((e) => e.id === redeliverMatch[1]);
-		if (!original) return json(res, 404, { message: 'Unknown event' });
-		const attempt = body.attempt ?? (original.attempt ?? 1) + 1;
-		const delaySeconds = body.delaySeconds ?? 0;
-		const { seq, ...event } = original;
-		state.scheduled.push({ dueAt: Date.now() + delaySeconds * 1000, event: { ...event, attempt } });
-		state.redeliverLog.push({ id: original.id, attempt, delaySeconds });
-		console.log(`  -> redeliver ${original.id} as attempt ${attempt} in ${delaySeconds}s`);
-		return json(res, 201, { id: original.id, attempt, delaySeconds });
-	}
-	// Endgültig gescheitertes Event melden (wird dem Nutzer in HalloPetra angezeigt)
-	const failedMatch = path.match(/^\/events\/([^/]+)\/failed$/);
-	if (failedMatch && req.method === 'POST') {
-		const body = await readBody(req);
-		state.failedEvents.push({ id: failedMatch[1], attempts: body.attempts, reason: body.reason });
-		console.log(`  -> event ${failedMatch[1]} permanently failed after ${body.attempts} attempts: ${body.reason ?? '(no reason)'}`);
-		return json(res, 201, { ok: true });
 	}
 	// Kontakte
 	const CONTACT_FIELDS = [
@@ -387,21 +415,6 @@ const server = http.createServer(async (req, res) => {
 		};
 		console.log(`  -> created task ${id}: ${body.title}`);
 		return json(res, 201, state.tasks[id]);
-	}
-
-	if (path === '/events' && req.method === 'GET') {
-		materializeScheduled();
-		const after = Number(url.searchParams.get('after') ?? 0);
-		const limit = Number(url.searchParams.get('limit') ?? 50);
-		const types = url.searchParams.get('types');
-		let events = state.events.filter((e) => e.seq > after);
-		if (types) {
-			const wanted = new Set(types.split(','));
-			events = events.filter((e) => wanted.has(e.type));
-		}
-		events = events.slice(0, limit);
-		const nextCursor = events.length ? String(events[events.length - 1].seq) : url.searchParams.get('after');
-		return json(res, 200, { events: events.map(({ seq, ...e }) => e), nextCursor });
 	}
 
 	json(res, 404, { message: `No route: ${req.method} ${path}` });

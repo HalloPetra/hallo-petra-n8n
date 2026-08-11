@@ -16,10 +16,12 @@ const RESPOND_TO_TRIGGER = {
 		nodeType: PETRA_TRIGGER_NODE_TYPE,
 		displayName: 'Petra Incoming Call Trigger',
 	},
-	'call.during': {
+	'call.tool': {
 		nodeType: PETRA_IN_CALL_TRIGGER_NODE_TYPE,
 		displayName: 'Petra In-Call Trigger',
 	},
+	// call.finished and form_submission are fire-and-forget: HalloPetra reads
+	// nothing back from them, so they are deliberately not offered here.
 } as const;
 
 type RespondTo = keyof typeof RESPOND_TO_TRIGGER;
@@ -90,7 +92,7 @@ export class PetraFinish implements INodeType {
 					},
 					{
 						name: 'During a Call',
-						value: 'call.during',
+						value: 'call.tool',
 						description:
 							'Answers a "Petra In-Call Trigger" — what Petra says and learns mid-conversation',
 					},
@@ -108,7 +110,7 @@ export class PetraFinish implements INodeType {
 				},
 				displayOptions: {
 					show: {
-						respondTo: ['call.during'],
+						respondTo: ['call.tool'],
 					},
 				},
 				default: '',
@@ -121,7 +123,7 @@ export class PetraFinish implements INodeType {
 				type: 'options',
 				displayOptions: {
 					show: {
-						respondTo: ['call.during'],
+						respondTo: ['call.tool'],
 					},
 				},
 				options: [
@@ -216,7 +218,7 @@ export class PetraFinish implements INodeType {
 		// Only sections that actually contain data end up in the response
 		const body: IDataObject = {};
 
-		if (respondTo === 'call.during') {
+		if (respondTo === 'call.tool') {
 			body.message = {
 				content: this.getNodeParameter('messageContent', 0, '') as string,
 				message_type: this.getNodeParameter('messageType', 0, 'SAY') as string,

@@ -43,10 +43,13 @@ export class PetraApi implements ICredentialType {
 		},
 	};
 
+	// Listing webhooks is the cheapest call that proves the key works and reaches
+	// the endpoint every trigger in this package depends on.
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/events/types',
+			url: '/webhooks',
+			qs: { limit: 1 },
 		},
 	};
 }

@@ -7,26 +7,21 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
 
+import { registrationProperty, syncResponseProperties } from '../shared/TriggerProperties';
 import {
 	checkPetraWebhook,
 	createPetraWebhook,
 	deletePetraWebhook,
+	petraRegistration,
 	receivePetraWebhook,
 	type PetraWebhookRegistration,
 } from '../shared/WebhookFunctions';
 
-/** The integration point this trigger registers for — see POST /webhooks. */
-const WEBHOOK_TYPE = 'call.incoming';
+/** The event this trigger registers for — see POST /webhooks. */
+const WEBHOOK_EVENT = 'call.incoming';
 
 function registration(context: IHookFunctions): PetraWebhookRegistration {
-	return {
-		type: WEBHOOK_TYPE,
-		url: context.getNodeWebhookUrl('default') as string,
-		// Shown in the operator's HalloPetra dashboard — name it after the
-		// workflow so a registration can be traced back to what created it.
-		name: `n8n: ${context.getWorkflow().name ?? 'workflow'}`,
-		description: 'Registered by n8n (n8n-nodes-hallopetra)',
-	};
+	return petraRegistration(context, WEBHOOK_EVENT);
 }
 
 export class PetraTrigger implements INodeType {
@@ -39,7 +34,7 @@ export class PetraTrigger implements INodeType {
 		usableAsTool: true,
 		subtitle: 'before Petra answers',
 		description:
-			'Starts the workflow while the phone is still ringing, before Petra takes the call — look up who is calling so Petra can greet them by name. Registers itself with HalloPetra when the workflow is published. The call data arrives as { webhook_id, event, data: { call_id, calling_phone_number, inbound_phone_number, start_time, contact, fields } }. Petra waits at most 2.5 seconds for the answer, so keep this workflow to a single lookup.',
+			'Starts the workflow while the phone is still ringing, before Petra takes the call — look up who is calling so Petra can greet them by name. Registers itself with HalloPetra when the workflow is published. The call data arrives as { webhook_id, event, data: { call_id, calling_phone_number, inbound_phone_number, start_time, contact, fields } }, where contact is null for an unknown caller. Answer with a "Reply to Petra" node. Petra waits at most 2.5 seconds — including this workflow\'s own startup — so keep it to a single lookup; on timeout the call simply proceeds without the data.',
 		defaults: {
 			name: 'Petra Incoming Call Trigger',
 		},
@@ -60,82 +55,7 @@ export class PetraTrigger implements INodeType {
 				path: 'webhook',
 			},
 		],
-		properties: [
-			{
-				displayName: 'Registration',
-				name: 'registration',
-				type: 'options',
-				options: [
-					{
-						name: 'Automatic (via HalloPetra API)',
-						value: 'automatic',
-						description:
-							'Register the webhook automatically with HalloPetra when the workflow is published. Incoming calls are verified via HMAC signature.',
-					},
-					{
-						name: 'Manual (Copy URL to HalloPetra)',
-						value: 'manual',
-						description:
-							'Do not call the HalloPetra API. Copy the production webhook URL from this trigger and configure it in the HalloPetra app yourself. Incoming calls are not signature-checked.',
-					},
-				],
-				default: 'automatic',
-				description: 'How the webhook becomes known to HalloPetra',
-			},
-			{
-				displayName: 'Respond',
-				name: 'responseMode',
-				type: 'options',
-				options: [
-					{
-						name: 'Using Reply to Petra Node',
-						value: 'responseNode',
-						description: 'The response is sent by a "Reply to Petra" node in this workflow',
-					},
-					{
-						name: 'When Last Node Finishes',
-						value: 'lastNode',
-						description: 'The response contains data of the last-executed node',
-					},
-					{
-						name: 'Immediately',
-						value: 'onReceived',
-						description: 'Respond as soon as the webhook is received, without waiting for the workflow',
-					},
-				],
-				default: 'responseNode',
-				description: 'When and how to respond to HalloPetra',
-			},
-			{
-				displayName: 'Response Data',
-				name: 'responseData',
-				type: 'options',
-				displayOptions: {
-					show: {
-						responseMode: ['lastNode'],
-					},
-				},
-				options: [
-					{
-						name: 'First Entry JSON',
-						value: 'firstEntryJson',
-						description: 'Returns the JSON data of the first entry of the last node',
-					},
-					{
-						name: 'All Entries',
-						value: 'allEntries',
-						description: 'Returns all entries of the last node',
-					},
-					{
-						name: 'No Response Body',
-						value: 'noData',
-						description: 'Returns without a body',
-					},
-				],
-				default: 'firstEntryJson',
-				description: 'What data should be returned when responding with the last node',
-			},
-		],
+		properties: [registrationProperty, ...syncResponseProperties],
 	};
 
 	webhookMethods = {

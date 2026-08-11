@@ -10,21 +10,62 @@ import { NodeOperationError } from 'n8n-workflow';
 import { petraApiRequest } from './GenericFunctions';
 
 /**
- * What `POST /webhooks` registers. `name` and `description` are optional to the
- * API for `call.incoming` but required for `call.during`, where they are the
- * tool name and the instruction Petra reads to decide when to call it — so both
- * triggers always send them and the difference stays out of this module.
+ * What `POST /webhooks` registers. `name` and `description` are the operator's
+ * label in the HalloPetra dashboard, not something Petra reads — every trigger
+ * derives them from the workflow, so the difference stays out of the nodes.
  */
 export interface PetraWebhookRegistration {
-	type: string;
+	event: string;
 	url: string;
 	name: string;
 	description: string;
+	/**
+	 * Narrows an asynchronous event to a subset, e.g. `ablauf_ids` for
+	 * `call.finished`. Omitted or empty means company-wide.
+	 */
+	scope?: PetraWebhookScope;
+}
+
+export interface PetraWebhookScope {
+	/** The field name the API expects, e.g. `ablauf_ids`. */
+	field: string;
+	ids: string[];
+}
+
+/**
+ * The label the operator sees in the HalloPetra dashboard. Carries the node
+ * name as well as the workflow's, because one workflow can register several
+ * webhooks and a list of identical rows helps nobody.
+ */
+export function dashboardName(context: IHookFunctions): string {
+	return `n8n: ${context.getWorkflow().name ?? 'workflow'} · ${context.getNode().name}`;
+}
+
+/** The registration body for a trigger that subscribes to exactly one event. */
+export function petraRegistration(
+	context: IHookFunctions,
+	event: string,
+	scope?: PetraWebhookScope,
+): PetraWebhookRegistration {
+	return {
+		event,
+		url: context.getNodeWebhookUrl('default') as string,
+		name: dashboardName(context),
+		description: 'Registered by n8n (n8n-nodes-hallopetra)',
+		scope,
+	};
 }
 
 /** True when the node is configured to leave registration to the operator. */
 function isManual(context: IHookFunctions): boolean {
 	return (context.getNodeParameter('registration', 'automatic') as string) === 'manual';
+}
+
+/** Order-insensitive comparison of a scope against what the API reports. */
+function sameIds(reported: unknown, wanted: string[]): boolean {
+	const actual = Array.isArray(reported) ? [...(reported as string[])].sort() : [];
+	const expected = [...wanted].sort();
+	return actual.length === expected.length && actual.every((id, i) => id === expected[i]);
 }
 
 /**
@@ -46,12 +87,16 @@ export async function checkPetraWebhook(
 	try {
 		// GET /webhooks/{id} returns the webhook itself, not a wrapper object
 		const webhook = await petraApiRequest.call(this, 'GET', `/webhooks/${staticData.webhookId}`);
-		// The type is immutable server-side and a node only ever registers one, so
-		// a mismatch is only checked when the API actually reports a type.
-		const typeMatches = !webhook.type || webhook.type === registration.type;
+		// The event is immutable server-side and a node only ever registers one, so
+		// a mismatch is only checked when the API actually reports an event.
+		const eventMatches = !webhook.event || webhook.event === registration.event;
+		// The scope is not patchable either — a changed selection means re-registering.
+		const scopeMatches =
+			!registration.scope || sameIds(webhook[registration.scope.field], registration.scope.ids);
 		const matches =
 			webhook.url === registration.url &&
-			typeMatches &&
+			eventMatches &&
+			scopeMatches &&
 			webhook.name === registration.name &&
 			webhook.description === registration.description;
 		if (matches) {
@@ -68,7 +113,7 @@ export async function checkPetraWebhook(
 			}
 			return true;
 		}
-		// URL, name or description changed since registration — start over
+		// URL, scope, name or description changed since registration — start over
 		await petraApiRequest.call(this, 'DELETE', `/webhooks/${staticData.webhookId}`);
 	} catch (error) {
 		// Webhook is unknown to HalloPetra (deleted remotely or never created)
@@ -92,14 +137,20 @@ export async function createPetraWebhook(
 		return true;
 	}
 
+	const body: IDataObject = {
+		event: registration.event,
+		url: registration.url,
+		name: registration.name,
+		description: registration.description,
+	};
+	// An empty selection is company-wide, and the API rejects an empty array.
+	if (registration.scope?.ids.length) {
+		body[registration.scope.field] = registration.scope.ids;
+	}
+
 	let response;
 	try {
-		response = await petraApiRequest.call(this, 'POST', '/webhooks', {
-			type: registration.type,
-			url: registration.url,
-			name: registration.name,
-			description: registration.description,
-		});
+		response = await petraApiRequest.call(this, 'POST', '/webhooks', body);
 	} catch (error) {
 		const httpCode = (error as { httpCode?: string }).httpCode;
 		throw new NodeOperationError(
@@ -110,7 +161,7 @@ export async function createPetraWebhook(
 					httpCode === '404'
 						? 'The HalloPetra API at the configured base URL has no webhook registration endpoint (yet). Check that the credential points to an environment that supports webhook registration.'
 						: httpCode === '400'
-							? `HalloPetra rejected the registration of type "${registration.type}". The API at the configured base URL may predate the webhook type contract — this node requires an environment that accepts "type" on POST /webhooks.`
+							? `HalloPetra rejected a registration for "${registration.event}". Either the API at the configured base URL does not know this event yet, or a selected entry no longer exists — reopen the selection in this node and publish again.`
 							: 'Check the API key and base URL in the Petra API credential.',
 			},
 		);

@@ -57,7 +57,14 @@ Incoming deliveries are verified with an HMAC signature (see [API contract](#api
 
 Starts the workflow while Petra is on the call, when she needs something she cannot answer herself. She reaches for it the way she would ask a colleague — you answer, and she keeps talking.
 
-The node registers a `call.tool` webhook when the workflow is published. **When Petra reaches for it is decided in the HalloPetra app, not here:** an operator wires the tool into an Ablauf and describes the situation it is for. This node only provides the endpoint and the answer.
+Publishing the workflow registers a `call.tool` webhook — and that registration **is** the tool. Everything Petra needs to use it is configured right here in the node:
+
+- **Tool Name** is what she calls the workflow by. It appears as a step in the Ablauf editor, so write it the way an operator would name the task: "Auftragsstatus nachschlagen".
+- **When Petra Should Use It** is what she reads to decide whether to reach for it. Write it as an instruction to her, in the language she speaks with your callers.
+- **Abläufe** is where the tool gets attached. Petra can only use it while she is running one of them, so pick at least one — a tool with no Ablauf has no place to appear and is rejected.
+- **Parameters** declares what she asks the caller for first. Each entry needs a key; the description is what she reads to fill the value, so phrase it as an instruction too ("Die Bestellnummer, nach der der Anrufer fragt. Frage nach, wenn sie nicht genannt wurde."). The answers arrive under `body.parameter`, keyed by your key.
+
+Changing any of it re-registers the tool when you publish, because none of it can be patched afterwards.
 
 The delivery nests everything under `body`:
 
@@ -81,7 +88,7 @@ The delivery nests everything under `body`:
 }
 ```
 
-`parameter` holds what Petra asked the caller — the variables configured on the webhook in the HalloPetra app become the questions she asks. `messages` is the conversation so far, without the system prompt.
+`parameter` holds what Petra asked the caller — one entry per parameter you declared. `messages` is the conversation so far, without the system prompt.
 
 > **You have 10 seconds.** More room than before the greeting, but the caller is still on the line and hears the pause. Finish with a *Reply to Petra* node so Petra knows what to say next.
 
@@ -146,20 +153,23 @@ Starts the workflow after a call has ended and Petra has written it up. The node
 
 ### Petra Form Submission Trigger
 
-Starts the workflow when someone submits a HalloPetra form. Registers a `form_submission` webhook, and like the trigger above it can fire for every form or only for selected ones.
+Starts the workflow when someone submits a HalloPetra form — filled in during a call or through a public form link. Registers a `form.submitted` webhook, and like the trigger above it can fire for every form or only for selected ones. Inactive forms stay selectable; the webhook starts firing once one is switched back on.
 
 ```json
 {
-  "event": "form_submission",
-  "form": { "id": "…", "title": "Rückrufbitte", "slug": "rueckrufbitte" },
-  "submission": { "submitted_at": "2026-08-07T10:15:00.000Z",
-                  "data": { "anliegen": "Bitte um Rückruf" } },
-  "contact": { "id": "…", "name": "Max Mustermann", "phone": "+491701234567", "email": "…" },
-  "call": { "id": "call_…", "topic": "…", "summary": "…", "date": "…" }
+  "webhook_id": "wh_…",
+  "event": "form.submitted",
+  "data": {
+    "form": { "id": "…", "title": "Rückrufbitte", "slug": "rueckrufbitte" },
+    "submission": { "submitted_at": "2026-08-07T10:15:00.000Z",
+                    "data": { "anliegen": "Bitte um Rückruf" } },
+    "contact": { "id": "…", "name": "Max Mustermann", "phone": "+491701234567", "email": "…" },
+    "call": { "id": "call_…", "topic": "…", "summary": "…", "date": "…" }
+  }
 }
 ```
 
-`submission.data` holds the entries keyed by field. `call` is filled when the form belongs to a call. This delivery is fire-and-forget as well.
+`submission.data` holds the entries keyed by field; file and signature entries carry a time-limited download URL. `contact` and `call` are `null` when the form was filled outside a call. This delivery is fire-and-forget as well.
 
 ### Create Petra Contact · Update Petra Contact · Create Petra Task
 
@@ -174,7 +184,7 @@ The other direction: what came out of the call goes back into HalloPetra, where 
 | Petra Incoming Call Trigger | `{{ $json.data.contact.id }}` |
 | Petra In-Call Trigger | `{{ $json.body.call.contact_id }}` |
 | Petra Call Finished Trigger | `{{ $json.data.contact_data.id }}` |
-| Petra Form Submission Trigger | `{{ $json.contact.id }}` |
+| Petra Form Submission Trigger | `{{ $json.data.contact.id }}` |
 
 Before the greeting the caller may still be unknown and the value empty — that is the case for *Create Petra Contact*, not for a lookup.
 
@@ -200,7 +210,9 @@ Petra Incoming Call Trigger
 **Petra asks mid-call, and gets an answer:**
 
 ```
-Petra In-Call Trigger (wired into an Ablauf as "Auftragsstatus nachschlagen")
+Petra In-Call Trigger (Tool Name: "Auftragsstatus nachschlagen",
+                       attached to the "Bestellannahme" Ablauf,
+                       Parameter "auftragsnummer")
   → HTTP Request (query your ERP with {{ $json.body.parameter.auftragsnummer }})
   → Reply to Petra (Respond To: During a Call — Message: "Your order ships on Thursday")
 ```
@@ -208,7 +220,7 @@ Petra In-Call Trigger (wired into an Ablauf as "Auftragsstatus nachschlagen")
 **What came out of the call ends up where the business looks:**
 
 ```
-Petra In-Call Trigger (wired into an Ablauf as "Anliegen aufnehmen")
+Petra In-Call Trigger (Tool Name: "Anliegen aufnehmen")
   → Update Petra Contact ({{ $json.body.call.contact_id }}, e-mail from the call)
   → Create Petra Task (title from the request, assigned to the team)
   → Reply to Petra (Message: "I have noted that, a colleague will call you back")
@@ -226,8 +238,8 @@ Petra Call Finished Trigger (only after "Notdienst-Anfrage aufnehmen")
 
 ```
 Petra Form Submission Trigger (every form)
-  → Update Petra Contact ({{ $json.contact.id }}, e-mail from the submission)
-  → Create Petra Task ("Formular: {{ $json.form.title }}")
+  → Update Petra Contact ({{ $json.data.contact.id }}, e-mail from the submission)
+  → Create Petra Task ("Formular: {{ $json.data.form.title }}")
 ```
 
 ## API contract
@@ -236,15 +248,15 @@ Base URL `https://api.hallopetra.de/v1`. Every request sends `Authorization: Bea
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /webhooks` | `{ url, event, name?, description?, headers?, ablauf_ids?, form_ids? }` → `201 { webhook: { id, url, event, name, active, createdAt }, secret }`. `event` is one of `call.incoming`, `call.tool`, `call.finished`, `form_submission`; anything else is a 400. A scoping array belongs to exactly one event — `ablauf_ids` to `call.finished`, `form_ids` to `form_submission`, 1–20 ids each, unknown ids rejected. Omit it for a company-wide registration. The request is strict: an unknown key is a 400. |
-| `GET /webhooks?url=&event=` | `{ items, totalCount }` — `url` is an exact-match filter, so a node can find its own registration by its endpoint |
+| `POST /webhooks` | `{ url, event, name?, description?, headers?, ablauf_ids?, formular_ids?, parameters? }` → `201 { webhook: { id, url, event, name, active, createdAt }, secret }`. `event` is one of `call.incoming`, `call.tool`, `call.finished`, `form.submitted`; anything else is a 400. The shape depends on it: `call.tool` requires `name` and `ablauf_ids` and accepts `parameters` (1–20 entries of `{ key, label?, description? }`, keys unique); `call.finished` takes an optional `ablauf_ids`; `form.submitted` an optional `formular_ids`. Every id array holds 1–20 known ids — omit it entirely for a company-wide registration, an empty array is a 400. The request is strict: an unknown key is a 400. |
+| `GET /webhooks?url=&event=` | `{ items, totalCount }` — `url` is an exact-match filter, so a node can find its own registration by its endpoint. Also used to validate the credential. |
 | `GET /webhooks/{id}` | The webhook itself (no wrapper object), or 404 once it is gone |
 | `GET /webhooks/{id}/secret` | `{ secret }` — the signing secret stays retrievable, so a receiver can be repaired without re-registering |
-| `PATCH /webhooks/{id}` | Change `url`, `name`, `description`, `active` or `headers`. Neither the event nor the scoping is patchable — changing either means re-registering. |
+| `PATCH /webhooks/{id}` | Change `url`, `name`, `description`, `active` or `headers`. Event, scoping and tool parameters are not patchable — changing any of them means re-registering. |
 | `DELETE /webhooks/{id}` | `{ deleted: true, id }` |
 | `POST /webhooks/{id}/test` | Sends a representative signed delivery and reports the outcome as `{ ok, status?, body?, error? }` — useful to confirm that an n8n instance is reachable from HalloPetra |
-| `GET /ablaeufe` | `{ ablaeufe: [{ id, title, status: "enabled"\|"disabled" }] }` — the picker behind the call-finished trigger's Ablauf selection. Also used to validate the credential. |
-| `GET /forms` | `{ forms: [{ id, title, slug }] }` — the picker behind the form trigger's selection |
+| `GET /ablaeufe` | `{ ablaeufe: [{ id, title, status: "enabled"\|"disabled" }] }` — the picker behind the in-call trigger's and the call-finished trigger's Ablauf selection |
+| `GET /formulare` | `{ formulare: [{ id, title, status: "enabled"\|"disabled" }] }` — the picker behind the form trigger's selection |
 | `POST /contacts` | `{ name?, salutation?, firstName?, lastName?, phone?, email?, address?, contactGroupIds?, fields? }` → `201` with the contact including its `id` |
 | `PATCH /contacts/{id}` | Same fields, at least one required. `fields` merges key by key; everything else is replaced. |
 | `POST /tasks` | `{ title, content?, dueAt?, recurrenceRule?, assignment?, contactId?, projektId?, origin? }` → `201` with the task |

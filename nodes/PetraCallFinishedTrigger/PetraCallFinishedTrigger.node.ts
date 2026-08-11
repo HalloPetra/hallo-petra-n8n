@@ -30,7 +30,7 @@ function registration(context: IHookFunctions): PetraWebhookRegistration {
 		(context.getNodeParameter('fires', 'all') as string) === 'selected'
 			? (context.getNodeParameter('ablaufIds', []) as string[])
 			: [];
-	return petraRegistration(context, WEBHOOK_EVENT, { field: 'ablauf_ids', ids });
+	return petraRegistration(context, WEBHOOK_EVENT, { scope: { field: 'ablauf_ids', ids } });
 }
 
 export class PetraCallFinishedTrigger implements INodeType {

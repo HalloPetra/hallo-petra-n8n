@@ -70,9 +70,10 @@ function rows(response: IDataObject, key: string): IDataObject[] {
 }
 
 /**
- * The company's Abläufe, for scoping a `call.finished` webhook. Disabled ones
- * stay listed: the API accepts them, and the webhook starts firing as soon as
- * the operator re-enables the Ablauf.
+ * The company's Abläufe — where a `call.tool` attaches itself, and what a
+ * `call.finished` webhook can be scoped to. Disabled ones stay listed: the API
+ * accepts them, and the webhook starts firing as soon as the operator
+ * re-enables the Ablauf.
  */
 export async function loadAblaeufe(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 	const response = await petraApiRequest.call(this, 'GET', '/ablaeufe');
@@ -86,12 +87,15 @@ export async function loadAblaeufe(this: ILoadOptionsFunctions): Promise<INodePr
 	}));
 }
 
-/** The company's forms, for scoping a `form_submission` webhook. */
-export async function loadForms(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-	const response = await petraApiRequest.call(this, 'GET', '/forms');
-	return rows(response, 'forms').map((form) => ({
-		name: (form.title as string) || (form.name as string) || (form.slug as string) || (form.id as string),
-		value: form.id as string,
-		description: form.slug as string | undefined,
+/** The company's forms, for scoping a `form.submitted` webhook. */
+export async function loadFormulare(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	const response = await petraApiRequest.call(this, 'GET', '/formulare');
+	return rows(response, 'formulare').map((formular) => ({
+		name: (formular.title as string) || (formular.id as string),
+		value: formular.id as string,
+		description:
+			formular.status === 'disabled'
+				? 'Currently inactive — this webhook starts firing once the form is switched back on'
+				: undefined,
 	}));
 }

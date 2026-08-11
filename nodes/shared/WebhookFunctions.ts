@@ -10,9 +10,11 @@ import { NodeOperationError } from 'n8n-workflow';
 import { petraApiRequest } from './GenericFunctions';
 
 /**
- * What `POST /webhooks` registers. `name` and `description` are the operator's
- * label in the HalloPetra dashboard, not something Petra reads — every trigger
- * derives them from the workflow, so the difference stays out of the nodes.
+ * What `POST /webhooks` registers. For three of the four events `name` and
+ * `description` are just the operator's label in the HalloPetra dashboard, and
+ * every trigger derives them from the workflow. `call.tool` is the exception:
+ * there the registration defines the tool itself, so that trigger overrides
+ * both with what the user wrote and adds `parameters`.
  */
 export interface PetraWebhookRegistration {
 	event: string;
@@ -20,16 +22,25 @@ export interface PetraWebhookRegistration {
 	name: string;
 	description: string;
 	/**
-	 * Narrows an asynchronous event to a subset, e.g. `ablauf_ids` for
-	 * `call.finished`. Omitted or empty means company-wide.
+	 * Narrows an event to a subset, e.g. `ablauf_ids` for `call.finished`.
+	 * Omitted or empty means company-wide — except for `call.tool`, where the
+	 * API requires at least one Ablauf to attach the tool to.
 	 */
 	scope?: PetraWebhookScope;
+	/** `call.tool` only: the arguments Petra fills from the conversation. */
+	parameters?: PetraToolParameter[];
 }
 
 export interface PetraWebhookScope {
 	/** The field name the API expects, e.g. `ablauf_ids`. */
 	field: string;
 	ids: string[];
+}
+
+export interface PetraToolParameter {
+	key: string;
+	label?: string;
+	description?: string;
 }
 
 /**
@@ -45,14 +56,14 @@ export function dashboardName(context: IHookFunctions): string {
 export function petraRegistration(
 	context: IHookFunctions,
 	event: string,
-	scope?: PetraWebhookScope,
+	overrides: Partial<Omit<PetraWebhookRegistration, 'event' | 'url'>> = {},
 ): PetraWebhookRegistration {
 	return {
 		event,
 		url: context.getNodeWebhookUrl('default') as string,
 		name: dashboardName(context),
 		description: 'Registered by n8n (n8n-nodes-hallopetra)',
-		scope,
+		...overrides,
 	};
 }
 
@@ -66,6 +77,27 @@ function sameIds(reported: unknown, wanted: string[]): boolean {
 	const actual = Array.isArray(reported) ? [...(reported as string[])].sort() : [];
 	const expected = [...wanted].sort();
 	return actual.length === expected.length && actual.every((id, i) => id === expected[i]);
+}
+
+/**
+ * Order-insensitive comparison of the declared tool parameters. Keys are unique
+ * per registration, so keying by them is enough; label and description are
+ * compared too, because both are what Petra reads when filling an argument.
+ */
+function sameParameters(reported: unknown, wanted: PetraToolParameter[]): boolean {
+	const actual = Array.isArray(reported) ? (reported as PetraToolParameter[]) : [];
+	if (actual.length !== wanted.length) {
+		return false;
+	}
+	const byKey = new Map(actual.map((parameter) => [parameter.key, parameter]));
+	return wanted.every((parameter) => {
+		const match = byKey.get(parameter.key);
+		return (
+			match !== undefined &&
+			(match.label ?? '') === (parameter.label ?? '') &&
+			(match.description ?? '') === (parameter.description ?? '')
+		);
+	});
 }
 
 /**
@@ -93,10 +125,14 @@ export async function checkPetraWebhook(
 		// The scope is not patchable either — a changed selection means re-registering.
 		const scopeMatches =
 			!registration.scope || sameIds(webhook[registration.scope.field], registration.scope.ids);
+		// The tool parameters are explicitly immutable server-side.
+		const parametersMatch =
+			!registration.parameters || sameParameters(webhook.parameters, registration.parameters);
 		const matches =
 			webhook.url === registration.url &&
 			eventMatches &&
 			scopeMatches &&
+			parametersMatch &&
 			webhook.name === registration.name &&
 			webhook.description === registration.description;
 		if (matches) {
@@ -146,6 +182,9 @@ export async function createPetraWebhook(
 	// An empty selection is company-wide, and the API rejects an empty array.
 	if (registration.scope?.ids.length) {
 		body[registration.scope.field] = registration.scope.ids;
+	}
+	if (registration.parameters?.length) {
+		body.parameters = registration.parameters;
 	}
 
 	let response;

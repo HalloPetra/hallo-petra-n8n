@@ -9,7 +9,7 @@ import type {
 } from 'n8n-workflow';
 import { NodeConnectionTypes } from 'n8n-workflow';
 
-import { loadForms } from '../shared/GenericFunctions';
+import { loadFormulare } from '../shared/GenericFunctions';
 import { registrationProperty } from '../shared/TriggerProperties';
 import {
 	checkPetraWebhook,
@@ -21,15 +21,17 @@ import {
 } from '../shared/WebhookFunctions';
 
 /** The event this trigger registers for — see POST /webhooks. */
-const WEBHOOK_EVENT = 'form_submission';
+const WEBHOOK_EVENT = 'form.submitted';
 
 function registration(context: IHookFunctions): PetraWebhookRegistration {
 	// An empty selection is a company-wide registration: every form counts.
 	const ids =
 		(context.getNodeParameter('fires', 'all') as string) === 'selected'
-			? (context.getNodeParameter('formIds', []) as string[])
+			? (context.getNodeParameter('formularIds', []) as string[])
 			: [];
-	return petraRegistration(context, WEBHOOK_EVENT, { field: 'form_ids', ids });
+	return petraRegistration(context, WEBHOOK_EVENT, {
+		scope: { field: 'formular_ids', ids },
+	});
 }
 
 export class PetraFormTrigger implements INodeType {
@@ -42,7 +44,7 @@ export class PetraFormTrigger implements INodeType {
 		usableAsTool: true,
 		subtitle: '={{$parameter["fires"] === "selected" ? "for selected forms" : "for every form"}}',
 		description:
-			'Starts the workflow when someone submits a HalloPetra form. The delivery arrives as { event, form: { id, title, slug }, submission: { submitted_at, data }, contact, call }, where "data" holds the entries keyed by field, and "call" is filled when the form belongs to a call. Nothing waits for an answer — write results back with the Petra contact and task nodes instead of replying.',
+			'Starts the workflow when someone submits a HalloPetra form — filled in during a call or through a public form link. The delivery arrives as { webhook_id, event, data: { form, submission, contact, call } }, where "submission.data" holds the entries keyed by field, and "contact" and "call" are null when the form was filled outside a call. File and signature entries carry a time-limited download URL. Nothing waits for an answer — write results back with the Petra contact and task nodes instead of replying.',
 		defaults: {
 			name: 'Petra Form Submission Trigger',
 		},
@@ -88,10 +90,10 @@ export class PetraFormTrigger implements INodeType {
 			},
 			{
 				displayName: 'Form Names or IDs',
-				name: 'formIds',
+				name: 'formularIds',
 				type: 'multiOptions',
 				typeOptions: {
-					loadOptionsMethod: 'getForms',
+					loadOptionsMethod: 'getFormulare',
 				},
 				displayOptions: {
 					show: {
@@ -108,8 +110,8 @@ export class PetraFormTrigger implements INodeType {
 
 	methods = {
 		loadOptions: {
-			async getForms(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return await loadForms.call(this);
+			async getFormulare(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return await loadFormulare.call(this);
 			},
 		},
 	};

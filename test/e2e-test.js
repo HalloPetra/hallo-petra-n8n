@@ -239,7 +239,23 @@ async function run() {
 	await ensureWorkflow('workflowBId', {
 		name: 'E2E In-Call Tool',
 		nodes: [
-			triggerNode('Petra In-Call Trigger', inCallType, { responseMode: 'responseNode' }),
+			// Die Registrierung ist zugleich die Werkzeugdefinition: Name, Anweisung,
+			// die Abläufe, an denen Petra es findet, und ihre Argumente.
+			triggerNode('Petra In-Call Trigger', inCallType, {
+				responseMode: 'responseNode',
+				toolName: 'Auftragsstatus nachschlagen',
+				toolDescription: 'Schlägt den Status eines Auftrags nach, wenn der Anrufer danach fragt.',
+				ablaufIds: ABLAUF_IDS,
+				parameters: {
+					values: [
+						{
+							key: 'auftragsnummer',
+							label: 'Auftragsnummer',
+							description: 'Die Auftragsnummer, nach der der Anrufer fragt.',
+						},
+					],
+				},
+			}),
 			{
 				id: crypto.randomUUID(),
 				name: 'Create Petra Contact',
@@ -351,10 +367,10 @@ async function run() {
 				typeVersion: 1,
 				position: [300, 0],
 				parameters: {
-					title: '=Formular: {{ $json.form.title }}',
+					title: '=Formular: {{ $json.data.form.title }}',
 					assignment: 'team',
 					additionalFields: {
-						content: '={{ $json.submission.data.anliegen }}',
+						content: '={{ $json.data.submission.data.anliegen }}',
 						origin: 'n8n-e2e-form',
 					},
 				},
@@ -378,13 +394,34 @@ async function run() {
 	check(
 		'Alle vier Webhooks registriert',
 		registered.length === 4 &&
-			['call.incoming', 'call.tool', 'call.finished', 'form_submission'].every((e) => byEvent[e]),
+			['call.incoming', 'call.tool', 'call.finished', 'form.submitted'].every((e) => byEvent[e]),
 		JSON.stringify(registered.map((w) => w.event)),
 	);
 	check(
 		'Registrierung trägt einen sprechenden Namen fürs Dashboard',
-		byEvent['call.tool']?.name?.startsWith('n8n: E2E In-Call Tool ·'),
-		byEvent['call.tool']?.name,
+		byEvent['call.finished']?.name?.startsWith('n8n: E2E Call Finished ·'),
+		byEvent['call.finished']?.name,
+	);
+	// call.tool ist der Sonderfall: die Registrierung IST die Werkzeugdefinition.
+	const registeredTool = byEvent['call.tool'];
+	check(
+		'call.tool registriert Name und Anweisung, die Petra liest',
+		registeredTool?.name === 'Auftragsstatus nachschlagen' &&
+			registeredTool?.description?.startsWith('Schlägt den Status'),
+		JSON.stringify({ name: registeredTool?.name, description: registeredTool?.description }),
+	);
+	check(
+		'call.tool hängt an genau den zwei gewählten Abläufen',
+		JSON.stringify([...(registeredTool?.ablauf_ids ?? [])].sort()) ===
+			JSON.stringify([...ABLAUF_IDS].sort()),
+		JSON.stringify(registeredTool?.ablauf_ids),
+	);
+	check(
+		'call.tool deklariert das Argument, das Petra beim Anrufer erfragt',
+		registeredTool?.parameters?.length === 1 &&
+			registeredTool.parameters[0].key === 'auftragsnummer' &&
+			registeredTool.parameters[0].label === 'Auftragsnummer',
+		JSON.stringify(registeredTool?.parameters),
 	);
 	check(
 		'call.finished ist auf genau die zwei gewählten Abläufe eingegrenzt',
@@ -393,9 +430,10 @@ async function run() {
 		JSON.stringify(byEvent['call.finished']?.ablauf_ids),
 	);
 	check(
-		'form_submission ist unternehmensweit registriert (keine Eingrenzung)',
-		byEvent['form_submission'] !== undefined && byEvent['form_submission'].form_ids === undefined,
-		JSON.stringify(byEvent['form_submission']?.form_ids ?? null),
+		'form.submitted ist unternehmensweit registriert (keine Eingrenzung)',
+		byEvent['form.submitted'] !== undefined &&
+			byEvent['form.submitted'].formular_ids === undefined,
+		JSON.stringify(byEvent['form.submitted']?.formular_ids ?? null),
 	);
 	const userAgents = [...new Set((await mock('GET', '/_test/state')).requestLog.map((r) => r.userAgent))];
 	check(
@@ -482,10 +520,10 @@ async function run() {
 		JSON.stringify(finishedTask),
 	);
 
-	// ------------------------------------------------- Asynchron: form_submission
+	// ------------------------------------------------- Asynchron: form.submitted
 	const beforeForm = await knownTaskIds();
-	const form = await mock('POST', '/_test/call-webhook', { event: 'form_submission' });
-	check('form_submission: Status 200', form.status === 200, `status=${form.status}`);
+	const form = await mock('POST', '/_test/call-webhook', { event: 'form.submitted' });
+	check('form.submitted: Status 200', form.status === 200, `status=${form.status}`);
 	const { task: formTask } = await waitForNewTask('n8n-e2e-form', beforeForm);
 	check(
 		'Formular: Aufgabe aus Formulartitel und Eingabe angelegt',
@@ -523,7 +561,7 @@ async function run() {
 	const afterDeactivate = Object.values((await mock('GET', '/_test/state')).webhooks);
 	check(
 		'Deaktivieren meldet den Webhook bei Petra ab',
-		!afterDeactivate.some((w) => w.event === 'form_submission'),
+		!afterDeactivate.some((w) => w.event === 'form.submitted'),
 		JSON.stringify(afterDeactivate.map((w) => w.event)),
 	);
 	await activateWorkflow(state.workflowDId);

@@ -11,13 +11,14 @@ const API_KEY = 'test-key';
 // lehnt POST /webhooks mit 400 ab.
 const EVENTS = {
 	'call.incoming': { sync: true },
-	'call.tool': { sync: true },
-	// Beide asynchronen Ereignisse lassen sich eingrenzen — auf Abläufe bzw.
-	// Formulare. Das Feld gehört jeweils genau zu einem Ereignis.
+	// Die Registrierung definiert hier das Werkzeug selbst: Name und Abläufe sind
+	// Pflicht, `parameters` deklariert, was Petra beim Anrufer erfragt.
+	'call.tool': { sync: true, scopeField: 'ablauf_ids', scopeRequired: true, definesTool: true },
+	// Die asynchronen Ereignisse lassen sich optional eingrenzen.
 	'call.finished': { sync: false, scopeField: 'ablauf_ids' },
-	form_submission: { sync: false, scopeField: 'form_ids' },
+	'form.submitted': { sync: false, scopeField: 'formular_ids' },
 };
-const SCOPE_FIELDS = ['ablauf_ids', 'form_ids'];
+const SCOPE_FIELDS = ['ablauf_ids', 'formular_ids'];
 
 // Feste IDs, damit der E2E-Test gezielt auswählen kann
 const ABLAEUFE = [
@@ -25,13 +26,14 @@ const ABLAEUFE = [
 	{ id: '1d5e9b7f-3ca2-4e48-9f6b-7a2e4d8c0b13', title: 'Termin vereinbaren', status: 'enabled' },
 	{ id: '2e6fac80-4db3-4f59-a07c-8b3f5e9d1c24', title: 'Alter Ablauf', status: 'disabled' },
 ];
-const FORMS = [
-	{ id: '3f70bd91-5ec4-4a6a-b18d-9c4a6f0e2d35', title: 'Rückrufbitte', slug: 'rueckrufbitte' },
-	{ id: '4a81cea2-6fd5-4b7b-c29e-0d5b7a1f3e46', title: 'Schadensmeldung', slug: 'schadensmeldung' },
+const FORMULARE = [
+	{ id: '3f70bd91-5ec4-4a6a-b18d-9c4a6f0e2d35', title: 'Rückrufbitte', status: 'enabled' },
+	{ id: '4a81cea2-6fd5-4b7b-c29e-0d5b7a1f3e46', title: 'Schadensmeldung', status: 'enabled' },
 ];
+const IDS_BY_SCOPE_FIELD = { ablauf_ids: ABLAEUFE, formular_ids: FORMULARE };
 
 const state = {
-	webhooks: {}, // id -> { id, event, url, name, description, ablauf_ids?, form_ids?, secret, createdAt }
+	webhooks: {}, // id -> { id, event, url, name, description, ablauf_ids?, formular_ids?, parameters?, secret, createdAt }
 	contacts: {}, // id -> Kontakt laut POST /contacts
 	tasks: {}, // id -> Aufgabe laut POST /tasks
 	requestLog: [], // { method, url, userAgent, time }
@@ -88,6 +90,7 @@ function publicWebhook(w) {
 	for (const field of SCOPE_FIELDS) {
 		if (w[field]?.length) out[field] = w[field];
 	}
+	if (w.parameters?.length) out.parameters = w.parameters;
 	return out;
 }
 
@@ -113,8 +116,9 @@ function samplePayload(event) {
 					previous_webhook_calls: [],
 				},
 				parameter: { auftragsnummer: 'A-4711' },
-				fields: { kontakt: { customer_number: 'K-4711' } },
+				fields: { kontakt: { customer_number: 'K-4711' }, prozess: {}, projekt: {} },
 			},
+			variables: {},
 		};
 	}
 	if (event === 'call.finished') {
@@ -145,21 +149,24 @@ function samplePayload(event) {
 			},
 		};
 	}
-	if (event === 'form_submission') {
+	if (event === 'form.submitted') {
 		return {
+			webhook_id: 'wh_test',
 			event,
-			form: { id: FORMS[0].id, title: FORMS[0].title, slug: FORMS[0].slug },
-			submission: {
-				submitted_at: now,
-				data: { name: 'Max Mustermann', anliegen: 'Bitte um Rückruf' },
+			data: {
+				form: { id: FORMULARE[0].id, title: FORMULARE[0].title, slug: 'rueckrufbitte' },
+				submission: {
+					submitted_at: now,
+					data: { name: 'Max Mustermann', anliegen: 'Bitte um Rückruf' },
+				},
+				contact: {
+					id: 'c0ffee00-0000-4000-8000-000000000001',
+					name: 'Max Mustermann',
+					phone: '+491701234567',
+					email: 'max@example.de',
+				},
+				call: { id: 'call_1', topic: 'Rückrufbitte', summary: 'Kunde bittet um Rückruf', date: now },
 			},
-			contact: {
-				id: 'c0ffee00-0000-4000-8000-000000000001',
-				name: 'Max Mustermann',
-				phone: '+491701234567',
-				email: 'max@example.de',
-			},
-			call: { id: 'call_1', topic: 'Rückrufbitte', summary: 'Kunde bittet um Rückruf', date: now },
 		};
 	}
 	return {
@@ -241,8 +248,8 @@ const server = http.createServer(async (req, res) => {
 	if (path === '/ablaeufe' && req.method === 'GET') {
 		return json(res, 200, { ablaeufe: ABLAEUFE });
 	}
-	if (path === '/forms' && req.method === 'GET') {
-		return json(res, 200, { forms: FORMS });
+	if (path === '/formulare' && req.method === 'GET') {
+		return json(res, 200, { formulare: FORMULARE });
 	}
 
 	if (path === '/webhooks' && req.method === 'POST') {
@@ -254,6 +261,7 @@ const server = http.createServer(async (req, res) => {
 				'name',
 				'description',
 				'headers',
+				'parameters',
 				...SCOPE_FIELDS,
 			])
 		)
@@ -275,11 +283,40 @@ const server = http.createServer(async (req, res) => {
 			if (!Array.isArray(body[field]) || !body[field].length || body[field].length > 20) {
 				return apiError(res, 'VALIDATION_ERROR', `${field} must hold between 1 and 20 ids`);
 			}
-			const known = new Set((field === 'ablauf_ids' ? ABLAEUFE : FORMS).map((row) => row.id));
+			const known = new Set(IDS_BY_SCOPE_FIELD[field].map((row) => row.id));
 			const unknown = body[field].filter((id) => !known.has(id));
 			if (unknown.length) {
 				return apiError(res, 'VALIDATION_ERROR', `Unknown ${field}: ${unknown.join(', ')}`);
 			}
+		}
+		// call.tool ist das einzige Ereignis mit Pflicht-Eingrenzung: ohne Ablauf
+		// gäbe es keine Stelle, an der Petra das Werkzeug anbieten könnte.
+		if (definition.scopeRequired && !body[definition.scopeField]?.length) {
+			return apiError(
+				res,
+				'VALIDATION_ERROR',
+				`${definition.scopeField} is required for "${body.event}"`,
+			);
+		}
+		// Die Registrierung eines Werkzeugs ist zugleich seine Definition
+		if (definition.definesTool) {
+			if (typeof body.name !== 'string' || !body.name.length) {
+				return apiError(res, 'VALIDATION_ERROR', `name is required for "${body.event}"`);
+			}
+			if (body.parameters !== undefined) {
+				if (!Array.isArray(body.parameters) || body.parameters.length > 20) {
+					return apiError(res, 'VALIDATION_ERROR', 'parameters must hold at most 20 entries');
+				}
+				const keys = body.parameters.map((parameter) => parameter?.key);
+				if (keys.some((key) => !/^[a-zA-Z0-9_-]{1,64}$/.test(key ?? ''))) {
+					return apiError(res, 'VALIDATION_ERROR', 'each parameter needs a valid key');
+				}
+				if (new Set(keys).size !== keys.length) {
+					return apiError(res, 'VALIDATION_ERROR', 'parameter keys must be unique');
+				}
+			}
+		} else if (body.parameters !== undefined) {
+			return apiError(res, 'VALIDATION_ERROR', `parameters is not allowed for "${body.event}"`);
 		}
 		const id = crypto.randomUUID();
 		const secret = `whsec_${crypto.randomBytes(16).toString('hex')}`;
@@ -290,7 +327,8 @@ const server = http.createServer(async (req, res) => {
 			name: body.name,
 			description: body.description,
 			ablauf_ids: body.ablauf_ids,
-			form_ids: body.form_ids,
+			formular_ids: body.formular_ids,
+			parameters: body.parameters,
 			secret,
 			createdAt: new Date().toISOString(),
 		};
@@ -322,7 +360,7 @@ const server = http.createServer(async (req, res) => {
 		}
 		if (!sub && req.method === 'PATCH') {
 			const body = await readBody(req);
-			// Weder das Ereignis noch die Eingrenzung sind änderbar
+			// Weder Ereignis noch Eingrenzung noch Werkzeug-Parameter sind änderbar
 			if (rejectUnknownKeys(res, body, ['url', 'name', 'description', 'active', 'headers'])) return;
 			Object.assign(webhook, body);
 			return json(res, 200, publicWebhook(webhook));

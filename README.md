@@ -2,12 +2,13 @@
 
 n8n community node package that connects [HalloPetra](https://hallopetra.de) — the digital office worker for trade businesses — to n8n workflows. Petra answers the phone when nobody else can, notes what the call was about, and leaves nobody on hold.
 
-This package lets your workflows join in, in four ways:
+Everything runs on webhooks that the nodes register with HalloPetra by themselves: publish the workflow and it is live, unpublish it and the registration is gone. Your workflows join in at five points:
 
 1. **Before the call:** While the phone is still ringing, HalloPetra calls a webhook registered in n8n and waits for the answer — for example the customer record looked up in your CRM. Petra greets the caller by name instead of asking who is speaking.
 2. **During the call:** Petra reaches for your workflow mid-conversation, the way she would ask a colleague — *"What is the status of order A-4711?"* You answer, and she keeps talking.
-3. **After the call:** Workflows react to what Petra did (finished calls, new contacts, booked appointments, form submissions), delivered through a polled event feed with built-in retry handling. The caller ends up as a contact in your accounting software, the summary as an email in the office — nobody types up notes in the evening.
-4. **Back into HalloPetra:** Create or update a contact, put a task on the team's list — so what came out of the call is where the business already looks.
+3. **After the call:** The moment Petra has written up the call, the summary, the transcript and everything she collected land in your workflow. The caller ends up as a contact in your accounting software, the summary as an email in the office — nobody types up notes in the evening. You can narrow this down to specific Abläufe.
+4. **When a form comes in:** Someone submits a HalloPetra form and the workflow starts, with the entries, the contact and the call it belongs to.
+5. **Back into HalloPetra:** Create or update a contact, put a task on the team's list — so what came out of the call is where the business already looks.
 
 ## Installation
 
@@ -56,12 +57,7 @@ Incoming deliveries are verified with an HMAC signature (see [API contract](#api
 
 Starts the workflow while Petra is on the call, when she needs something she cannot answer herself. She reaches for it the way she would ask a colleague — you answer, and she keeps talking.
 
-**Tool Name and Tool Description are not decoration.** They are what Petra reads mid-conversation to decide whether this workflow is the right one. Describe the *situation*, not the technical steps:
-
-- Name: *Look up order status*
-- Description: *Looks up the status of an order when the caller asks about an order they placed*
-
-The node registers a `call.during` webhook when the workflow is published; HalloPetra rejects a registration without both fields. An operator wires the tool into an Aufgabe in the HalloPetra app, and from then on Petra can reach for it.
+The node registers a `call.tool` webhook when the workflow is published. **When Petra reaches for it is decided in the HalloPetra app, not here:** an operator wires the tool into an Ablauf and describes the situation it is for. This node only provides the endpoint and the answer.
 
 The delivery nests everything under `body`:
 
@@ -91,7 +87,7 @@ The delivery nests everything under `body`:
 
 ### Reply to Petra
 
-Sends the synchronous response back to HalloPetra. **Respond To** picks which trigger this workflow started from, because the two phases expect different answers.
+Sends the synchronous response back to HalloPetra. **Respond To** picks which trigger this workflow started from, because the two phases expect different answers. Only these two are answered at all — the call-finished and form triggers are fire-and-forget.
 
 Answering the **Incoming Call** trigger:
 
@@ -121,28 +117,49 @@ Answering the **In-Call** trigger adds what Petra says next:
 
 Expressions work in every field. **All sections are optional:** anything left empty is omitted from the response entirely. This is a terminal node without outputs — it marks the end of the synchronous part. To run additional steps after responding (logging, for instance), branch off *before* this node; the response is sent the moment the node runs.
 
-### Petra Activity Trigger
+### Petra Call Finished Trigger
 
-Polls the HalloPetra event feed (at most once per minute) and starts the workflow with a batch of new events. Every item carries `_petra` metadata (`eventId`, `attempt`) used by the retry node. Filter by event type in the node; the dropdown loads the available asynchronous types from your account.
+Starts the workflow after a call has ended and Petra has written it up. The node registers a `call.finished` webhook when the workflow is published.
 
-**Semantics: delivered means done.** An event counts as processed once it has been delivered — unless a *Petra Retry on Next Poll* node asks for redelivery. The only client-side state is the feed cursor, stored in n8n's workflow static data and written exclusively by the poller.
+**Fires** decides how much you get: *After every call*, or *Only after selected Abläufe*. The Abläufe are loaded from your account; a call that ran any one of them starts the workflow. A scoped registration also shows up on each of those Abläufe in the HalloPetra app under "Nach dem Anruf", so an operator can see what is attached where. Disabled Abläufe stay selectable — the webhook simply starts firing once one is switched back on.
 
-**A failed run does not lose data.** HalloPetra keeps events for **30 days**. If a workflow was broken or your CRM was unreachable, the events are still there — and a workflow that was switched off over the weekend catches up on everything once it is published again.
+```json
+{
+  "webhook_id": "wh_…",
+  "event": "call.finished",
+  "data": {
+    "id": "call_…", "duration": 184, "phone": "+491701234567",
+    "topic": "Heizung ausgefallen",
+    "summary": "Herr Mustermann meldet einen Totalausfall seiner Gasheizung.",
+    "messages": [{ "role": "user", "content": "…", "secondsFromStart": 4.2 }],
+    "collected_data": { "issue_information": "Fehlercode F28" },
+    "contact_data": { "id": "…", "name": "Max Mustermann", "phone": "+491701234567" },
+    "email_send_to": null, "forwarded_to": null, "main_task_id": "…",
+    "fields": { "kontakt": {}, "prozess": {}, "projekt": {} }
+  }
+}
+```
 
-### Petra Retry on Next Poll
+`duration` is in seconds, `collected_data` is what Petra noted during the call, and `main_task_id` names the Ablauf that ran.
 
-Place this in the **error path** of your workflow (a node's error output, or "Continue (using error output)"). It is a terminal node without outputs. It asks HalloPetra to redeliver the event, which then reappears in the feed with an incremented `attempt` and is delivered again on a later poll.
+> **Delivered once, never retried, nothing waits for an answer.** Do not add a *Reply to Petra* node — nothing reads the response. To write results back, use the contact and task nodes. Since there is no redelivery, a workflow that throws loses that delivery: catch errors inside the workflow if the data matters.
 
-- **Fibonacci backoff:** The wait before redelivery grows with each failed attempt — `Backoff Base` (default 60 s) × 1, 2, 3, 5, 8, … The node passes it as `delaySeconds`; HalloPetra keeps the event out of the feed until then.
-- **Failure report:** Once `Max Attempts` (default 5) is reached, the event is no longer redelivered. Instead the node reports the permanent failure to HalloPetra so it can be shown to the business in the app. After that the event is done as far as n8n is concerned; retrying it again is a server-side action.
+### Petra Form Submission Trigger
 
-> **Why redelivery instead of local retry state?** n8n does not share workflow static data live between a polling trigger (cached in the main process) and workflow executions — a marker written by the retry node would never reach the poller. Going through the API works in queue mode too and keeps the poller the single writer of the cursor.
+Starts the workflow when someone submits a HalloPetra form. Registers a `form_submission` webhook, and like the trigger above it can fire for every form or only for selected ones.
 
-**Rules for reliable retries:**
+```json
+{
+  "event": "form_submission",
+  "form": { "id": "…", "title": "Rückrufbitte", "slug": "rueckrufbitte" },
+  "submission": { "submitted_at": "2026-08-07T10:15:00.000Z",
+                  "data": { "anliegen": "Bitte um Rückruf" } },
+  "contact": { "id": "…", "name": "Max Mustermann", "phone": "+491701234567", "email": "…" },
+  "call": { "id": "call_…", "topic": "…", "summary": "…", "date": "…" }
+}
+```
 
-- Errors must be caught **inside the same workflow** through error outputs, otherwise the retry node never runs. If an execution crashes uncaught, the event is not redelivered (deliberate best-effort design).
-- Delivery is **at-least-once** — build idempotent workflows.
-- Workflow static data is only persisted for active (production) workflows. In the editor's test mode the trigger therefore returns the latest events without touching the cursor.
+`submission.data` holds the entries keyed by field. `call` is filled when the form belongs to a call. This delivery is fire-and-forget as well.
 
 ### Create Petra Contact · Update Petra Contact · Create Petra Task
 
@@ -150,7 +167,16 @@ The other direction: what came out of the call goes back into HalloPetra, where 
 
 **Create Petra Contact** adds someone to the contact directory, so Petra knows them by name the next time they call. All fields are optional; the node returns the new contact including its ID.
 
-**Update Petra Contact** writes what you learned to an existing contact. Only the fields you fill in change. It needs the **Contact ID** — both triggers carry it when the caller was recognised (`{{ $json.data.contact.id }}` before the call, `{{ $json.body.call.contact_id }}` during it). When the caller was unknown, both are empty; that is the case for *Create Petra Contact*, not for a lookup.
+**Update Petra Contact** writes what you learned to an existing contact. Only the fields you fill in change. It needs the **Contact ID**, and every trigger carries it once the caller is known — each in its own place:
+
+| Trigger | Expression |
+| --- | --- |
+| Petra Incoming Call Trigger | `{{ $json.data.contact.id }}` |
+| Petra In-Call Trigger | `{{ $json.body.call.contact_id }}` |
+| Petra Call Finished Trigger | `{{ $json.data.contact_data.id }}` |
+| Petra Form Submission Trigger | `{{ $json.contact.id }}` |
+
+Before the greeting the caller may still be unknown and the value empty — that is the case for *Create Petra Contact*, not for a lookup.
 
 **Create Petra Task** puts an Aufgabe on the team's list. Only **Title** is required. **Assign To** is *Team* by default (nobody in particular — the whole team sees it), or one specific member, or Petra herself. Under additional fields: content as Markdown, a due date with an optional iCalendar recurrence rule, the contact and Projekt it belongs to, and an origin shown in the dashboard.
 
@@ -174,7 +200,7 @@ Petra Incoming Call Trigger
 **Petra asks mid-call, and gets an answer:**
 
 ```
-Petra In-Call Trigger ("Look up order status")
+Petra In-Call Trigger (wired into an Ablauf as "Auftragsstatus nachschlagen")
   → HTTP Request (query your ERP with {{ $json.body.parameter.auftragsnummer }})
   → Reply to Petra (Respond To: During a Call — Message: "Your order ships on Thursday")
 ```
@@ -182,7 +208,7 @@ Petra In-Call Trigger ("Look up order status")
 **What came out of the call ends up where the business looks:**
 
 ```
-Petra In-Call Trigger ("Note a new request")
+Petra In-Call Trigger (wired into an Ablauf as "Anliegen aufnehmen")
   → Update Petra Contact ({{ $json.body.call.contact_id }}, e-mail from the call)
   → Create Petra Task (title from the request, assigned to the team)
   → Reply to Petra (Message: "I have noted that, a colleague will call you back")
@@ -191,8 +217,17 @@ Petra In-Call Trigger ("Note a new request")
 **After hanging up, the right thing happens by itself:**
 
 ```
-Petra Activity Trigger (call.finished)
-  → Code / HTTP Request (store the summary)   ── error output ──→ Petra Retry on Next Poll
+Petra Call Finished Trigger (only after "Notdienst-Anfrage aufnehmen")
+  → HTTP Request (open a ticket with {{ $json.data.summary }})
+  → Create Petra Task (follow-up, assigned to the team)
+```
+
+**A form comes in and lands where the team works:**
+
+```
+Petra Form Submission Trigger (every form)
+  → Update Petra Contact ({{ $json.contact.id }}, e-mail from the submission)
+  → Create Petra Task ("Formular: {{ $json.form.title }}")
 ```
 
 ## API contract
@@ -201,23 +236,24 @@ Base URL `https://api.hallopetra.de/v1`. Every request sends `Authorization: Bea
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /events/types` | Event catalogue: `{ types: [{ name, label, mode: "sync"\|"async", description }] }`. The `async` types drive the activity trigger; the synchronous deliveries have a trigger node each. Also used to validate the credential. |
-| `POST /webhooks` | `{ url, type, name?, description?, headers? }` → `201 { webhook: { id, url, type, name, active, createdAt }, secret }`. `type` is `call.incoming` or `call.during`; feed events cannot be subscribed to and are rejected with a 400. `call.during` requires `name` and `description` — they become Petra's tool name and instruction. The request is strict: an unknown key (such as the pre-08/2026 `event`) is a 400. |
+| `POST /webhooks` | `{ url, event, name?, description?, headers?, ablauf_ids?, form_ids? }` → `201 { webhook: { id, url, event, name, active, createdAt }, secret }`. `event` is one of `call.incoming`, `call.tool`, `call.finished`, `form_submission`; anything else is a 400. A scoping array belongs to exactly one event — `ablauf_ids` to `call.finished`, `form_ids` to `form_submission`, 1–20 ids each, unknown ids rejected. Omit it for a company-wide registration. The request is strict: an unknown key is a 400. |
+| `GET /webhooks?url=&event=` | `{ items, totalCount }` — `url` is an exact-match filter, so a node can find its own registration by its endpoint |
 | `GET /webhooks/{id}` | The webhook itself (no wrapper object), or 404 once it is gone |
 | `GET /webhooks/{id}/secret` | `{ secret }` — the signing secret stays retrievable, so a receiver can be repaired without re-registering |
-| `PATCH /webhooks/{id}` | Change `url`, `name`, `description`, `active` or `headers`. The type is immutable. |
+| `PATCH /webhooks/{id}` | Change `url`, `name`, `description`, `active` or `headers`. Neither the event nor the scoping is patchable — changing either means re-registering. |
 | `DELETE /webhooks/{id}` | `{ deleted: true, id }` |
 | `POST /webhooks/{id}/test` | Sends a representative signed delivery and reports the outcome as `{ ok, status?, body?, error? }` — useful to confirm that an n8n instance is reachable from HalloPetra |
-| `GET /events?after=&types=&ids=&limit=` | Feed: `{ events: [{ id, type, occurredAt, payload }], nextCursor }` — `after` is exclusive, `limit` max 100, async events only |
+| `GET /ablaeufe` | `{ ablaeufe: [{ id, title, status: "enabled"\|"disabled" }] }` — the picker behind the call-finished trigger's Ablauf selection. Also used to validate the credential. |
+| `GET /forms` | `{ forms: [{ id, title, slug }] }` — the picker behind the form trigger's selection |
 | `POST /contacts` | `{ name?, salutation?, firstName?, lastName?, phone?, email?, address?, contactGroupIds?, fields? }` → `201` with the contact including its `id` |
 | `PATCH /contacts/{id}` | Same fields, at least one required. `fields` merges key by key; everything else is replaced. |
 | `POST /tasks` | `{ title, content?, dueAt?, recurrenceRule?, assignment?, contactId?, projektId?, origin? }` → `201` with the task |
 
 Errors come back as `{ error: { code, message, requestId } }`, where `code` is one of `VALIDATION_ERROR`, `UNAUTHORIZED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMIT_EXCEEDED`, `INTERNAL_ERROR`. Quote the `requestId` in support requests. The rate limit is 300 requests per minute per API key.
 
-**Signature of incoming webhook calls:** `X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex>` — HMAC-SHA256 over `"<t>.<rawBody>"` using the webhook's secret, with a ±300 s tolerance (Stripe-style scheme). Both triggers verify this automatically whenever the webhook was registered through the API. If the secret is ever missing locally, the trigger re-fetches it from `GET /webhooks/{id}/secret` when the workflow is activated, rather than falling back to unverified deliveries.
+**Signature of incoming webhook calls:** `X-HalloPetra-Signature: t=<unixSeconds>,v1=<hex>` — HMAC-SHA256 over `"<t>.<rawBody>"` using the webhook's secret, with a ±300 s tolerance (Stripe-style scheme). Every trigger verifies this automatically whenever the webhook was registered through the API. If the secret is ever missing locally, the trigger re-fetches it from `GET /webhooks/{id}/secret` when the workflow is activated, rather than falling back to unverified deliveries.
 
-Two endpoints backing the retry node — `POST /events/{id}/redeliver` and `POST /events/{id}/failed` — are specified but not yet available in the public API.
+**Deliveries are never retried.** For the two synchronous events that is by design — the call moves on. For the asynchronous ones it means a failing workflow loses that delivery, so catch errors inside the workflow.
 
 ## Development
 
@@ -244,15 +280,14 @@ mkdir -p "$DATA/nodes" && (cd "$DATA/nodes" && npm init -y >/dev/null && npm ins
 docker run -d --name n8n-petra -p 5678:5678 -v "$DATA:/home/node/.n8n" \
   -e "WEBHOOK_URL=http://localhost:5678/" -e N8N_SECURE_COOKIE=false n8nio/n8n:latest
 
-node test/e2e-test.js phase1   # owner setup, credential, both sync round trips, action nodes
-node test/e2e-test.js phase2   # activate the events workflow with an error path and retry node
-sleep 180
-node test/e2e-test.js phase3   # verify redelivery, backoff, failure report and cursor progress
+node test/e2e-test.js run                            # the whole test, ~30 s
 ```
+
+The run sets up the owner account and the credential, builds one workflow per trigger, publishes them, and then checks that all four registered themselves with the right event and scoping. Each gets a signed delivery: the two synchronous ones must answer in the right format, the two asynchronous ones must acknowledge without a body and create a task from the payload. It closes with the two lifecycle paths that are easy to get wrong — changing the Ablauf selection has to re-register, unpublishing has to deregister.
 
 The mock expects the API key `test-key` and is reachable from inside the container at `http://host.docker.internal:7788` (the test script pre-configures the credential accordingly). `WEBHOOK_URL=http://localhost:5678/` makes n8n register a URL the mock can reach from the host — no tunnel needed for a local run. For a run against the real API, `test/n8n-docker.sh` sets a public URL instead.
 
-Phase 3 needs three feed polls to have happened (one per minute) — if its last checks fail, the third redelivery has simply not been polled yet. Wait a minute and run it again.
+The run is idempotent: it resets the workflows it finds in `test/e2e-state.json` and identifies its own contacts and tasks rather than counting them, so it can be repeated without restarting n8n or the mock.
 
 ## Contributing
 

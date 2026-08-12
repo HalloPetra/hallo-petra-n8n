@@ -33,6 +33,12 @@ function registration(context: IHookFunctions): PetraWebhookRegistration {
 	return petraRegistration(context, WEBHOOK_EVENT, { scope: { field: 'ablauf_ids', ids } });
 }
 
+// Deliberately no `usableAsTool`: a trigger cannot be invoked as an AI tool.
+	// The rule below flipped meaning between plugin versions — 0.28 (bundled with
+	// node-cli) demands the property, 0.29 (used by scan-community-package, the
+	// gate for verification) forbids it here. The scanner wins; drop this once
+	// node-cli ships 0.29.
+	// eslint-disable-next-line @n8n/community-nodes/node-usable-as-tool
 export class PetraCallFinishedTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Petra Call Finished Trigger',
@@ -40,10 +46,9 @@ export class PetraCallFinishedTrigger implements INodeType {
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['trigger'],
 		version: 1,
-		usableAsTool: true,
 		subtitle: '={{$parameter["fires"] === "selected" ? "for selected Abläufe" : "after every call"}}',
 		description:
-			'Starts the workflow after a call has ended and Petra has written it up — hand the result to a CRM, a ticket system or a spreadsheet. The delivery carries the summary, the topic, the full transcript, the data collected during the call and the linked contact. It arrives once, is never retried, and nothing waits for an answer: write results back with the Petra contact and task nodes instead of replying.',
+			'Starts the workflow after a call has ended and Petra has written it up — hand the result to a CRM, a ticket system or a spreadsheet. The delivery carries the summary, the topic, the full transcript, the data collected during the call and the linked contact. It arrives once, is never retried, and nothing waits for an answer: write results back with the Petra contact nodes instead of replying.',
 		defaults: {
 			name: 'Petra Call Finished Trigger',
 		},

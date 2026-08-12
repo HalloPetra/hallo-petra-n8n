@@ -34,6 +34,12 @@ function registration(context: IHookFunctions): PetraWebhookRegistration {
 	});
 }
 
+// Deliberately no `usableAsTool`: a trigger cannot be invoked as an AI tool.
+	// The rule below flipped meaning between plugin versions — 0.28 (bundled with
+	// node-cli) demands the property, 0.29 (used by scan-community-package, the
+	// gate for verification) forbids it here. The scanner wins; drop this once
+	// node-cli ships 0.29.
+	// eslint-disable-next-line @n8n/community-nodes/node-usable-as-tool
 export class PetraFormTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Petra Form Submission Trigger',
@@ -41,10 +47,9 @@ export class PetraFormTrigger implements INodeType {
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['trigger'],
 		version: 1,
-		usableAsTool: true,
 		subtitle: '={{$parameter["fires"] === "selected" ? "for selected forms" : "for every form"}}',
 		description:
-			'Starts the workflow when someone submits a HalloPetra form — filled in during a call or through a public form link. The delivery arrives as { webhook_id, event, data: { form, submission, contact, call } }, where "submission.data" holds the entries keyed by field, and "contact" and "call" are null when the form was filled outside a call. File and signature entries carry a time-limited download URL. Nothing waits for an answer — write results back with the Petra contact and task nodes instead of replying.',
+			'Starts the workflow when someone submits a HalloPetra form — filled in during a call or through a public form link. The delivery arrives as { webhook_id, event, data: { form, submission, contact, call } }, where "submission.data" holds the entries keyed by field, and "contact" and "call" are null when the form was filled outside a call. File and signature entries carry a time-limited download URL. Nothing waits for an answer — write results back with the Petra contact nodes instead of replying.',
 		defaults: {
 			name: 'Petra Form Submission Trigger',
 		},

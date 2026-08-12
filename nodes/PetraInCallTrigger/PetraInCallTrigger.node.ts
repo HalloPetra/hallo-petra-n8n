@@ -72,6 +72,12 @@ function registration(context: IHookFunctions): PetraWebhookRegistration {
 	});
 }
 
+// Deliberately no `usableAsTool`: a trigger cannot be invoked as an AI tool.
+	// The rule below flipped meaning between plugin versions — 0.28 (bundled with
+	// node-cli) demands the property, 0.29 (used by scan-community-package, the
+	// gate for verification) forbids it here. The scanner wins; drop this once
+	// node-cli ships 0.29.
+	// eslint-disable-next-line @n8n/community-nodes/node-usable-as-tool
 export class PetraInCallTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Petra In-Call Trigger',
@@ -79,7 +85,6 @@ export class PetraInCallTrigger implements INodeType {
 		icon: { light: 'file:petra.svg', dark: 'file:petra.dark.svg' },
 		group: ['trigger'],
 		version: 1,
-		usableAsTool: true,
 		subtitle: '={{$parameter["toolName"] || "while Petra is on the call"}}',
 		description:
 			'Makes this workflow a tool Petra can use mid-conversation, when she needs something she cannot answer herself — look up an order, check a delivery date, book a slot. Publishing the workflow creates the tool in HalloPetra and attaches it to the Abläufe you pick; Petra reaches for it once a conversation gets there. The delivery arrives as { body: { webhook_id, call, parameter, fields } }, where "parameter" holds the values Petra collected from the caller. She waits up to 10 seconds — finish the workflow with a "Reply to Petra" node so she can keep talking.',

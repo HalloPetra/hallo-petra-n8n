@@ -46,12 +46,10 @@ export class PetraApi implements ICredentialType {
 	};
 
 	// Listing webhooks is the cheapest call that proves the key works and reaches
-	// the endpoint every trigger in this package depends on. The base URL is
-	// normalised the same way the nodes do it, so a credential still carrying
-	// the old `/v1` suffix tests green instead of failing with a 404.
+	// the endpoint every trigger in this package depends on.
 	test: ICredentialTestRequest = {
 		request: {
-			baseURL: '={{ $credentials.baseUrl.replace(/\\/+$/, "").replace(/\\/v1$/, "") }}',
+			baseURL: '={{$credentials.baseUrl}}',
 			url: '/v1/webhooks',
 			qs: { limit: 1 },
 		},

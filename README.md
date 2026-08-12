@@ -246,7 +246,7 @@ Petra Form Submission Trigger (every form)
 
 ## API contract
 
-Base URL `https://hallopetra-api.vercel.app`, to which the nodes append `/v1` — the endpoints below are relative to that. The version is part of the contract this package implements, not something to configure; a credential that still carries a trailing `/v1` from an earlier version keeps working, the nodes strip it. Every request sends `Authorization: Bearer <API key>` and the user agent `n8n-nodes-hallopetra/<version>`.
+Base URL `https://hallopetra-api.vercel.app`, to which the nodes append `/v1` — the endpoints below are relative to that. The version is part of the contract this package implements, not something to configure. Every request sends `Authorization: Bearer <API key>` and the user agent `n8n-nodes-hallopetra/<version>`.
 
 | Endpoint | Purpose |
 | --- | --- |

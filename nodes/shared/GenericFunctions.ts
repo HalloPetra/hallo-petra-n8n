@@ -31,11 +31,7 @@ export async function petraApiRequest(
 	const credentials = await this.getCredentials('petraApi');
 	// The API version belongs to the contract this package implements, not to
 	// the user's configuration — a build speaks v1 or it does not work at all.
-	// A trailing `/v1` is tolerated anyway: earlier versions asked for it, and
-	// the resulting `/v1/v1` would be a 404 nobody enjoys tracking down.
-	const baseUrl = ((credentials.baseUrl as string) ?? '')
-		.replace(/\/+$/, '')
-		.replace(/\/v1$/, '');
+	const baseUrl = ((credentials.baseUrl as string) ?? '').replace(/\/+$/, '');
 
 	const options: IHttpRequestOptions = {
 		method,

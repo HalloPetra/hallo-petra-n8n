@@ -81,22 +81,23 @@ async function waitFor(description, predicate, timeoutMs = 20000) {
 	return last;
 }
 
-/** Die Aufgaben-IDs, die es jetzt schon gibt. */
-async function knownTaskIds() {
-	return new Set(Object.keys((await mock('GET', '/_test/state')).tasks));
+/** Die Kontakt-IDs, die es jetzt schon gibt. */
+async function knownContactIds() {
+	return new Set(Object.keys((await mock('GET', '/_test/state')).contacts));
 }
 
 /**
- * Auf die Aufgabe warten, die dieser Durchlauf anlegt. Der Mock läuft über
- * mehrere Testläufe hinweg weiter, also zählt nicht "eine Aufgabe existiert",
- * sondern "eine neue mit dieser Herkunft ist dazugekommen".
+ * Auf den Kontakt warten, den dieser Durchlauf anlegt — der Nachweis, dass eine
+ * asynchrone Zustellung wirklich angekommen ist und den Workflow durchlaufen
+ * hat. Der Mock läuft über mehrere Testläufe hinweg weiter, also zählt nicht
+ * "ein Kontakt mit dem Namen existiert", sondern "ein neuer ist dazugekommen".
  */
-async function waitForNewTask(origin, before) {
-	const isNew = (task) => task.origin === origin && !before.has(task.id);
-	const state = await waitFor(`Aufgabe mit origin=${origin}`, (s) =>
-		Object.values(s.tasks).some(isNew),
+async function waitForNewContact(name, before) {
+	const isNew = (contact) => contact.name === name && !before.has(contact.id);
+	const state = await waitFor(`Kontakt "${name}"`, (s) =>
+		Object.values(s.contacts).some(isNew),
 	);
-	return { state, task: Object.values(state.tasks).find(isNew) };
+	return { state, contact: Object.values(state.contacts).find(isNew) };
 }
 
 const credentials = () => ({ petraApi: { id: state.credentialId, name: 'Petra API (Mock)' } });
@@ -186,7 +187,7 @@ async function run() {
 		.filter((t) => t.name.toLowerCase().includes('petra') && !t.name.endsWith('Tool'))
 		.map((t) => t.name);
 	console.log('Gefundene Petra-Node-Typen:', petraTypes);
-	check('Alle 8 Nodes geladen', petraTypes.length === 8, petraTypes.join(', '));
+	check('Alle 7 Nodes geladen', petraTypes.length === 7, petraTypes.join(', '));
 	const nodeType = (suffix) => petraTypes.find((n) => n.endsWith(`.${suffix}`));
 	const incomingType = nodeType('petraTrigger');
 	const inCallType = nodeType('petraInCallTrigger');
@@ -195,7 +196,6 @@ async function run() {
 	const finishType = nodeType('petraFinish');
 	const contactCreateType = nodeType('petraContactCreate');
 	const contactUpdateType = nodeType('petraContactUpdate');
-	const taskCreateType = nodeType('petraTaskCreate');
 
 	// ---------------------------------------------------------------- Credential
 	if (!state.credentialId) {
@@ -298,23 +298,10 @@ async function run() {
 			},
 			{
 				id: crypto.randomUUID(),
-				name: 'Create Petra Task',
-				type: taskCreateType,
-				typeVersion: 1,
-				position: [660, 0],
-				parameters: {
-					title: 'Rückruf zum Auftrag',
-					assignment: 'team',
-					additionalFields: { contactId: '={{ $json.id }}', origin: 'n8n-e2e-tool' },
-				},
-				credentials: credentials(),
-			},
-			{
-				id: crypto.randomUUID(),
 				name: 'Reply to Petra',
 				type: finishType,
 				typeVersion: 1,
-				position: [880, 0],
+				position: [660, 0],
 				parameters: {
 					respondTo: 'call.tool',
 					messageContent: 'Ihr Auftrag ist in Bearbeitung.',
@@ -327,8 +314,7 @@ async function run() {
 		connections: {
 			'Petra In-Call Trigger': { main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]] },
 			'Create Petra Contact': { main: [[{ node: 'Update Petra Contact', type: 'main', index: 0 }]] },
-			'Update Petra Contact': { main: [[{ node: 'Create Petra Task', type: 'main', index: 0 }]] },
-			'Create Petra Task': { main: [[{ node: 'Reply to Petra', type: 'main', index: 0 }]] },
+			'Update Petra Contact': { main: [[{ node: 'Reply to Petra', type: 'main', index: 0 }]] },
 		},
 	});
 
@@ -340,23 +326,24 @@ async function run() {
 				fires: 'selected',
 				ablaufIds: ABLAUF_IDS,
 			}),
+			// Der angelegte Kontakt ist der Nachweis, dass die Zustellung ankam:
+			// asynchrone Ereignisse antworten nicht, also braucht es eine Spur.
 			{
 				id: crypto.randomUUID(),
-				name: 'Create Petra Task',
-				type: taskCreateType,
+				name: 'Create Petra Contact',
+				type: contactCreateType,
 				typeVersion: 1,
 				position: [300, 0],
 				parameters: {
-					title: '=Nachbereitung: {{ $json.data.topic }}',
-					assignment: 'team',
-					additionalFields: { content: '={{ $json.data.summary }}', origin: 'n8n-e2e-finished' },
+					name: '=Nachbereitung: {{ $json.data.topic }}',
+					contactFields: { phone: '={{ $json.data.phone }}' },
 				},
 				credentials: credentials(),
 			},
 		],
 		connections: {
 			'Petra Call Finished Trigger': {
-				main: [[{ node: 'Create Petra Task', type: 'main', index: 0 }]],
+				main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]],
 			},
 		},
 	});
@@ -368,24 +355,20 @@ async function run() {
 			triggerNode('Petra Form Submission Trigger', formType, { fires: 'all' }),
 			{
 				id: crypto.randomUUID(),
-				name: 'Create Petra Task',
-				type: taskCreateType,
+				name: 'Create Petra Contact',
+				type: contactCreateType,
 				typeVersion: 1,
 				position: [300, 0],
 				parameters: {
-					title: '=Formular: {{ $json.data.form.title }}',
-					assignment: 'team',
-					additionalFields: {
-						content: '={{ $json.data.submission.data.anliegen }}',
-						origin: 'n8n-e2e-form',
-					},
+					name: '=Formular: {{ $json.data.form.title }}',
+					contactFields: { email: '={{ $json.data.contact.email }}' },
 				},
 				credentials: credentials(),
 			},
 		],
 		connections: {
 			'Petra Form Submission Trigger': {
-				main: [[{ node: 'Create Petra Task', type: 'main', index: 0 }]],
+				main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]],
 			},
 		},
 	});
@@ -472,7 +455,7 @@ async function run() {
 	check('Falsche Signatur wird abgelehnt (401)', badCall.status === 401, `status=${badCall.status}`);
 
 	// ------------------------------------------------------ Synchron: call.tool
-	const beforeTool = await knownTaskIds();
+	const beforeTool = await knownContactIds();
 	const tool = await mock('POST', '/_test/call-webhook', { event: 'call.tool' });
 	console.log('Sync-Antwort (call.tool):', JSON.stringify(tool));
 	let toolBody = {};
@@ -489,15 +472,12 @@ async function run() {
 		tool.body,
 	);
 
-	// Die Aufgabe zeigt auf den Kontakt, den derselbe Durchlauf angelegt hat —
-	// darüber ist die ganze Kette ohne Zählerei nachweisbar.
-	const { state: afterTool, task: toolTask } = await waitForNewTask('n8n-e2e-tool', beforeTool);
-	const contact = afterTool.contacts[toolTask?.contactId];
+	// Der Kontakt dieses Durchlaufs trägt beide Schritte der Kette: angelegt vom
+	// Create-Node, um die E-Mail ergänzt vom Update-Node.
+	const { contact } = await waitForNewContact('Max Mustermann', beforeTool);
 	check(
 		'Kontakt angelegt — mit Name, Telefonnummer und Feld aus dem Anruf',
-		contact?.name === 'Max Mustermann' &&
-			contact?.phone === '+491701234567' &&
-			contact?.fields?.customer_number === 'K-4711',
+		contact?.phone === '+491701234567' && contact?.fields?.customer_number === 'K-4711',
 		JSON.stringify(contact),
 	);
 	check(
@@ -505,14 +485,9 @@ async function run() {
 		contact?.email === 'max@mustermann.de' && contact?.fields?.customer_number === 'K-4711',
 		JSON.stringify(contact),
 	);
-	check(
-		'Aufgabe erstellt — am Kontakt, mit Team-Zuweisung',
-		toolTask?.title === 'Rückruf zum Auftrag' && toolTask?.assignment?.type === 'team',
-		JSON.stringify(toolTask),
-	);
 
 	// --------------------------------------------------- Asynchron: call.finished
-	const beforeFinished = await knownTaskIds();
+	const beforeFinished = await knownContactIds();
 	const finished = await mock('POST', '/_test/call-webhook', { event: 'call.finished' });
 	check('call.finished: Status 200', finished.status === 200, `status=${finished.status}`);
 	check(
@@ -520,23 +495,25 @@ async function run() {
 		!JSON.parse(finished.body || '{}').fields && !JSON.parse(finished.body || '{}').message,
 		finished.body,
 	);
-	const { task: finishedTask } = await waitForNewTask('n8n-e2e-finished', beforeFinished);
+	const { contact: finishedContact } = await waitForNewContact(
+		'Nachbereitung: Heizung ausgefallen',
+		beforeFinished,
+	);
 	check(
-		'Nach dem Anruf: Aufgabe aus Thema und Zusammenfassung angelegt',
-		finishedTask?.title === 'Nachbereitung: Heizung ausgefallen' &&
-			finishedTask?.content?.startsWith('Herr Mustermann meldet'),
-		JSON.stringify(finishedTask),
+		'Nach dem Anruf: Workflow lief, Daten aus der Zustellung angekommen',
+		finishedContact?.phone === '+491701234567',
+		JSON.stringify(finishedContact),
 	);
 
 	// ------------------------------------------------- Asynchron: form.submitted
-	const beforeForm = await knownTaskIds();
+	const beforeForm = await knownContactIds();
 	const form = await mock('POST', '/_test/call-webhook', { event: 'form.submitted' });
 	check('form.submitted: Status 200', form.status === 200, `status=${form.status}`);
-	const { task: formTask } = await waitForNewTask('n8n-e2e-form', beforeForm);
+	const { contact: formContact } = await waitForNewContact('Formular: Rückrufbitte', beforeForm);
 	check(
-		'Formular: Aufgabe aus Formulartitel und Eingabe angelegt',
-		formTask?.title === 'Formular: Rückrufbitte' && formTask?.content === 'Bitte um Rückruf',
-		JSON.stringify(formTask),
+		'Formular: Workflow lief, Daten aus der Einreichung angekommen',
+		formContact?.email === 'max@example.de',
+		JSON.stringify(formContact),
 	);
 
 	// ------------------------------------------- Lebenszyklus: Drift und Abmelden

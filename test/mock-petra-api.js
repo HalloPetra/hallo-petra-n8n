@@ -35,7 +35,7 @@ const IDS_BY_SCOPE_FIELD = { ablauf_ids: ABLAEUFE, formular_ids: FORMULARE };
 const state = {
 	webhooks: {}, // id -> { id, event, url, name, description, ablauf_ids?, formular_ids?, parameters?, secret, createdAt }
 	contacts: {}, // id -> Kontakt laut POST /contacts
-	tasks: {}, // id -> Aufgabe laut POST /tasks
+	// /tasks fehlt bewusst: kein Node im Paket legt noch Aufgaben an.
 	requestLog: [], // { method, url, userAgent, time }
 };
 
@@ -424,39 +424,6 @@ const server = http.createServer(async (req, res) => {
 		console.log(`  -> updated contact ${contact.id}: ${Object.keys(body).join(', ')}`);
 		return json(res, 200, contact);
 	}
-	// Aufgaben
-	if (path === '/tasks' && req.method === 'POST') {
-		const body = await readBody(req);
-		if (
-			rejectUnknownKeys(res, body, [
-				'title',
-				'content',
-				'dueAt',
-				'recurrenceRule',
-				'assignment',
-				'command',
-				'onBehalfOfUserId',
-				'projektId',
-				'contactId',
-				'origin',
-			])
-		)
-			return;
-		if (!body.title?.trim()) {
-			return apiError(res, 'VALIDATION_ERROR', 'title is required');
-		}
-		const id = crypto.randomUUID();
-		state.tasks[id] = {
-			id,
-			status: 'open',
-			assignment: { type: 'team' },
-			...body,
-			createdAt: new Date().toISOString(),
-		};
-		console.log(`  -> created task ${id}: ${body.title}`);
-		return json(res, 201, state.tasks[id]);
-	}
-
 	json(res, 404, { message: `No route: ${req.method} ${path}` });
 });
 

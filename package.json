@@ -1,64 +1,63 @@
 {
-	"name": "@hallopetra/n8n-nodes-hallopetra",
-	"version": "1.0.0",
-	"description": "n8n community nodes for HalloPetra: webhooks before, during and after a call, form submissions, contacts and tasks",
-	"license": "MIT",
-	"homepage": "https://github.com/HalloPetra/hallo-petra-n8n",
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/HalloPetra/hallo-petra-n8n.git"
-	},
-	"bugs": {
-		"url": "https://github.com/HalloPetra/hallo-petra-n8n/issues"
-	},
-	"keywords": [
-		"n8n-community-node-package"
-	],
-	"author": {
-		"name": "Torben Keller",
-		"email": "torben@hallopetra.de"
-	},
-	"scripts": {
-		"build": "n8n-node build",
-		"build:watch": "tsc --watch",
-		"dev": "n8n-node dev",
-		"lint": "n8n-node lint",
-		"lint:fix": "n8n-node lint --fix",
-		"release": "n8n-node release",
-		"prepublishOnly": "n8n-node prerelease"
-	},
-	"files": [
-		"dist"
-	],
-	"publishConfig": {
-		"access": "public"
-	},
-	"n8n": {
-		"n8nNodesApiVersion": 1,
-		"strict": true,
-		"credentials": [
-			"dist/credentials/PetraApi.credentials.js"
-		],
-		"nodes": [
-			"dist/nodes/PetraTrigger/PetraTrigger.node.js",
-			"dist/nodes/PetraInCallTrigger/PetraInCallTrigger.node.js",
-			"dist/nodes/PetraCallFinishedTrigger/PetraCallFinishedTrigger.node.js",
-			"dist/nodes/PetraFormTrigger/PetraFormTrigger.node.js",
-			"dist/nodes/PetraFinish/PetraFinish.node.js",
-			"dist/nodes/PetraContactCreate/PetraContactCreate.node.js",
-			"dist/nodes/PetraContactUpdate/PetraContactUpdate.node.js",
-			"dist/nodes/PetraTaskCreate/PetraTaskCreate.node.js"
-		]
-	},
-	"devDependencies": {
-		"@n8n/node-cli": "*",
-		"@types/node": "^26.1.2",
-		"eslint": "9.39.4",
-		"prettier": "3.8.3",
-		"release-it": "20.2.0",
-		"typescript": "5.9.3"
-	},
-	"peerDependencies": {
-		"n8n-workflow": "*"
-	}
+  "name": "@hallopetra/n8n-nodes-hallopetra",
+  "version": "1.0.0",
+  "description": "n8n community nodes for HalloPetra: webhooks before, during and after a call, form submissions, contacts and tasks",
+  "license": "MIT",
+  "homepage": "https://github.com/HalloPetra/hallo-petra-n8n",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HalloPetra/hallo-petra-n8n.git"
+  },
+  "bugs": {
+    "url": "https://github.com/HalloPetra/hallo-petra-n8n/issues"
+  },
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "author": {
+    "name": "Torben Keller",
+    "email": "torben@hallopetra.de"
+  },
+  "scripts": {
+    "build": "n8n-node build",
+    "build:watch": "tsc --watch",
+    "dev": "n8n-node dev",
+    "lint": "n8n-node lint",
+    "lint:fix": "n8n-node lint --fix",
+    "release": "n8n-node release",
+    "prepublishOnly": "n8n-node prerelease"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/PetraApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/PetraTrigger/PetraTrigger.node.js",
+      "dist/nodes/PetraInCallTrigger/PetraInCallTrigger.node.js",
+      "dist/nodes/PetraCallFinishedTrigger/PetraCallFinishedTrigger.node.js",
+      "dist/nodes/PetraFormTrigger/PetraFormTrigger.node.js",
+      "dist/nodes/PetraFinish/PetraFinish.node.js",
+      "dist/nodes/PetraContactCreate/PetraContactCreate.node.js",
+      "dist/nodes/PetraContactUpdate/PetraContactUpdate.node.js"
+    ]
+  },
+  "devDependencies": {
+    "@n8n/node-cli": "*",
+    "@types/node": "^26.1.2",
+    "eslint": "9.39.4",
+    "prettier": "3.8.3",
+    "release-it": "20.2.0",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
 }

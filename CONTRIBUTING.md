@@ -18,7 +18,7 @@ HalloPetra is **the digital office worker** ("digitale Bürokraft"), never an AI
 | **Reply to Petra** — structured response node, one selector for both synchronous phases | Responder **"Antwort an Petra"** (`respond`) — same `respondTo` selector | not portable to Zapier |
 | **Petra Call Finished Trigger** — registers `call.finished`, optionally scoped to Abläufe | **"Nach einem Anruf"** | — |
 | **Petra Form Submission Trigger** — registers `form.submitted`, optionally scoped to forms | — | — |
-| **Create / Update Petra Contact**, **Create Petra Task** | **"Kontakt anlegen"**, **"Kontakt aktualisieren"**, **"Aufgabe erstellen"** | — |
+| **Create / Update Petra Contact** | **"Kontakt anlegen"**, **"Kontakt aktualisieren"** | — |
 | Ablauf and form pickers (`GET /ablaeufe`, `GET /formulare`) | RPCs `getWebhookTypes` / `getEventTypes` | `event_type_list` trigger |
 | — | Universal module **"Eigener API-Aufruf"** (`make-api-call`) — required by Make's review checklist | — |
 
@@ -67,8 +67,7 @@ nodes/PetraFormTrigger/                 # form.submitted: a submitted form, scop
 nodes/PetraFinish/                      # synchronous response for either call phase
 nodes/PetraContactCreate/               # POST /contacts
 nodes/PetraContactUpdate/               # PATCH /contacts/{id}
-nodes/PetraTaskCreate/                  # POST /tasks
-test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, Abläufe, forms, contacts, tasks)
+test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, Abläufe, forms, contacts)
 test/e2e-test.js                        # end-to-end test against n8n in Docker, one run
 .github/workflows/publish.yml           # npm publish with provenance, triggered by version tags
 .github/workflows/ci.yml                # lint + build on push and PR
@@ -114,11 +113,11 @@ Requirements n8n applies to verified community nodes, and where this package sta
 - `npx @n8n/scan-community-package @hallopetra/n8n-nodes-hallopetra` passes — met, all security checks green
 - `repository` in `package.json` matches the GitHub repository, case-sensitively — met
 
-One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships eight nodes. They all serve HalloPetra, and they fall into three groups worth naming explicitly in the submission:
+One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships seven nodes. They all serve HalloPetra, and they fall into three groups worth naming explicitly in the submission:
 
 - **Two synchronous triggers and their shared responder.** `PetraTrigger` and `PetraInCallTrigger` cover the two moments HalloPetra calls out and waits, and `PetraFinish` is the only way to answer either — a synchronous webhook is useless without a way to respond. The three are functionally one unit.
 - **Two asynchronous triggers.** `PetraCallFinishedTrigger` and `PetraFormTrigger` are the fire-and-forget half: one event each, no response, an optional scope. They are separate nodes because their payloads and their scoping sources have nothing in common.
-- **Three action nodes.** Create contact, update contact, create task — the plain CRUD half of the same API, cut the way the Make app cuts it so users of both integrations look for the same thing.
+- **Two action nodes.** Create contact and update contact — the plain CRUD half of the same API, cut the way the Make app cuts it so users of both integrations look for the same thing.
 
 ## Open points
 

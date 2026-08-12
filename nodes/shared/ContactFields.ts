@@ -1,6 +1,25 @@
 import type { IDataObject, IExecuteFunctions, INodeProperties } from 'n8n-workflow';
 
 /**
+ * `name` when creating a contact: its own required field rather than one
+ * option among many. The HalloPetra contact list and its search go by this
+ * field, and the API neither derives it from first and last name nor complains
+ * when it is missing — a contact without one is stored and answered with an id,
+ * but stays invisible in the app. A collection cannot mark an option required,
+ * so the field has to sit outside it.
+ */
+export const contactNameProperty: INodeProperties = {
+	displayName: 'Name',
+	name: 'name',
+	type: 'string',
+	default: '',
+	required: true,
+	placeholder: 'Max Mustermann',
+	description:
+		'The name HalloPetra lists and searches this contact by. For a person the full name, for a company its name. First and last name below are stored in addition, but the app does not build the name from them.',
+};
+
+/**
  * The contact attributes `POST /contacts` and `PATCH /contacts/{id}` accept.
  * Both endpoints take the same set, so both nodes show the same collection.
  * Options are alphabetical because the n8n linter requires it.
@@ -72,6 +91,17 @@ export const contactFieldsProperty: INodeProperties = {
 	],
 };
 
+/**
+ * The same collection for the create node, where `name` is a required field of
+ * its own and would otherwise be offered twice.
+ */
+export const contactFieldsWithoutNameProperty: INodeProperties = {
+	...contactFieldsProperty,
+	options: (contactFieldsProperty.options as INodeProperties[]).filter(
+		(option) => option.name !== 'name',
+	),
+};
+
 /** The contact's own field data — free-form keys, defined per company. */
 export const contactFieldDataProperty: INodeProperties = {
 	displayName: 'Field Data',
@@ -129,6 +159,14 @@ export function buildContactBody(context: IExecuteFunctions, itemIndex: number):
 		if (typeof value === 'string' && value.trim()) {
 			body[key] = value.trim();
 		}
+	}
+
+	// The create node carries `name` outside the collection, the update node
+	// inside it. Reading both keeps one builder for both; the dedicated field
+	// wins, because it is the one the user was required to fill in.
+	const separateName = context.getNodeParameter('name', itemIndex, '') as string;
+	if (typeof separateName === 'string' && separateName.trim()) {
+		body.name = separateName.trim();
 	}
 
 	const groupIds = ((input.contactGroupIds as string) ?? '')

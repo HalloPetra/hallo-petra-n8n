@@ -175,7 +175,9 @@ Starts the workflow when someone submits a HalloPetra form — filled in during 
 
 The other direction: what came out of the call goes back into HalloPetra, where the business already looks.
 
-**Create Petra Contact** adds someone to the contact directory, so Petra knows them by name the next time they call. All fields are optional; the node returns the new contact including its ID.
+**Create Petra Contact** adds someone to the contact directory, so Petra knows them by name the next time they call. The node returns the new contact including its ID.
+
+**Name** is the one required field, and worth a word on why: the HalloPetra app lists and searches contacts by it. The API does not build it from first and last name, and it does not complain when it is missing — a contact created without one is stored, answers with an ID, and never shows up in the app. The node therefore refuses to create one, including when an expression happens to resolve to nothing. First and last name are stored in addition, not instead.
 
 **Update Petra Contact** writes what you learned to an existing contact. Only the fields you fill in change. It needs the **Contact ID**, and every trigger carries it once the caller is known — each in its own place:
 

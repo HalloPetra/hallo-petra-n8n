@@ -9,11 +9,14 @@
 const fs = require('fs');
 const crypto = require('crypto');
 
-const N8N = 'http://localhost:5678';
-const MOCK = 'http://localhost:7788';
+// Überschreibbar, damit der Test neben einer laufenden Entwicklungsinstanz auf
+// einem zweiten Port laufen kann, statt ihr die Workflows umzuschreiben:
+//   N8N_URL=http://localhost:5679 E2E_STATE=… node test/e2e-test.js run
+const N8N = process.env.N8N_URL ?? 'http://localhost:5678';
+const MOCK = process.env.MOCK_URL ?? 'http://localhost:7788';
 // n8n läuft im Docker-Container — von dort ist die Mock-API über host.docker.internal erreichbar
-const MOCK_FROM_N8N = 'http://host.docker.internal:7788';
-const STATE_FILE = __dirname + '/e2e-state.json';
+const MOCK_FROM_N8N = process.env.MOCK_URL_FROM_N8N ?? 'http://host.docker.internal:7788';
+const STATE_FILE = process.env.E2E_STATE ?? __dirname + '/e2e-state.json';
 
 // Zwei der drei Abläufe aus dem Mock — die dritte Auswahl bleibt bewusst außen vor,
 // damit die Eingrenzung nachweislich nicht "alles" bedeutet.
@@ -263,8 +266,11 @@ async function run() {
 				typeVersion: 1,
 				position: [220, 0],
 				parameters: {
+					// Der Name ist ein eigenes Pflichtfeld, nicht Teil der Collection:
+					// ohne ihn legt die API zwar an, aber die HalloPetra-App zeigt
+					// den Kontakt nirgends.
+					name: 'Max Mustermann',
 					contactFields: {
-						name: 'Max Mustermann',
 						phone: '={{ $json.body.call.calling_phone_number }}',
 					},
 					fields: {
@@ -488,8 +494,10 @@ async function run() {
 	const { state: afterTool, task: toolTask } = await waitForNewTask('n8n-e2e-tool', beforeTool);
 	const contact = afterTool.contacts[toolTask?.contactId];
 	check(
-		'Kontakt angelegt — mit Telefonnummer und Feld aus dem Anruf',
-		contact?.phone === '+491701234567' && contact?.fields?.customer_number === 'K-4711',
+		'Kontakt angelegt — mit Name, Telefonnummer und Feld aus dem Anruf',
+		contact?.name === 'Max Mustermann' &&
+			contact?.phone === '+491701234567' &&
+			contact?.fields?.customer_number === 'K-4711',
 		JSON.stringify(contact),
 	);
 	check(

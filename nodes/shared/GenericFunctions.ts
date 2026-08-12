@@ -56,8 +56,47 @@ export async function petraApiRequest(
 			options,
 		)) as IDataObject;
 	} catch (error) {
-		throw new NodeApiError(this.getNode(), error as JsonObject);
+		const envelope = errorEnvelope(error);
+		if (!envelope) {
+			throw new NodeApiError(this.getNode(), error as JsonObject);
+		}
+		// The envelope carries the only thing that identifies this call in
+		// HalloPetra's own logs. Losing it turns every server-side fault into
+		// guesswork, so it goes into the message the user actually sees.
+		throw new NodeApiError(this.getNode(), error as JsonObject, {
+			message: `HalloPetra: ${envelope.message ?? envelope.code ?? 'request failed'}`,
+			description: envelope.requestId
+				? `${envelope.code ?? 'ERROR'} · request ID ${envelope.requestId} — quote it when asking HalloPetra support to look this up.`
+				: (envelope.code as string | undefined),
+		});
 	}
+}
+
+interface PetraErrorEnvelope {
+	code?: string;
+	message?: string;
+	requestId?: string;
+}
+
+/**
+ * Every HalloPetra error is `{ error: { code, message, requestId } }`. Where n8n
+ * parks the parsed body depends on how the request failed, so all the known
+ * spots are checked rather than the one that happened to work first.
+ */
+function errorEnvelope(error: unknown): PetraErrorEnvelope | undefined {
+	const candidates = [
+		(error as { response?: { body?: unknown } })?.response?.body,
+		(error as { cause?: { error?: unknown } })?.cause?.error,
+		(error as { cause?: unknown })?.cause,
+		(error as { error?: unknown })?.error,
+	];
+	for (const candidate of candidates) {
+		const envelope = (candidate as { error?: PetraErrorEnvelope })?.error;
+		if (envelope && (envelope.requestId || envelope.code || envelope.message)) {
+			return envelope;
+		}
+	}
+	return undefined;
 }
 
 /**

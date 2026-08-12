@@ -192,17 +192,21 @@ export async function createPetraWebhook(
 		response = await petraApiRequest.call(this, 'POST', '/webhooks', body);
 	} catch (error) {
 		const httpCode = (error as { httpCode?: string }).httpCode;
+		// petraApiRequest puts HalloPetra's own code and request ID here — the
+		// only handle on a server-side fault, so it must survive re-wrapping.
+		const fromApi = (error as { description?: string }).description;
+		const hint =
+			httpCode === '404'
+				? 'The HalloPetra API at the configured base URL has no webhook registration endpoint. Check the base URL in the credential — it takes the host only, without "/v1".'
+				: httpCode === '400'
+					? `HalloPetra rejected a registration for "${registration.event}". Either the API at the configured base URL does not know this event yet, or a selected entry no longer exists — reopen the selection in this node and publish again.`
+					: httpCode && Number(httpCode) >= 500
+						? `HalloPetra failed while creating the registration for "${registration.event}". This is a fault on their side, not a problem with this workflow: the request was accepted and then broke during processing. Retry once; if it persists, report it with the request ID below.`
+						: 'Check the API key and base URL in the Petra API credential.';
 		throw new NodeOperationError(
 			this.getNode(),
 			`Could not register the webhook with HalloPetra (POST /webhooks failed${httpCode ? ` with status ${httpCode}` : ''})`,
-			{
-				description:
-					httpCode === '404'
-						? 'The HalloPetra API at the configured base URL has no webhook registration endpoint (yet). Check that the credential points to an environment that supports webhook registration.'
-						: httpCode === '400'
-							? `HalloPetra rejected a registration for "${registration.event}". Either the API at the configured base URL does not know this event yet, or a selected entry no longer exists — reopen the selection in this node and publish again.`
-							: 'Check the API key and base URL in the Petra API credential.',
-			},
+			{ description: fromApi ? `${hint}\n\n${fromApi}` : hint },
 		);
 	}
 

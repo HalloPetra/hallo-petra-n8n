@@ -212,7 +212,9 @@ async function deliverSigned(webhook, payloadObject, { badSignature = false } = 
 
 const server = http.createServer(async (req, res) => {
 	const url = new URL(req.url, `http://localhost:${PORT}`);
-	const path = url.pathname;
+	// Wie die echte API liegt alles unter /v1; die Routen unten führen den
+	// Präfix nicht mit. Die Test-Helfer unter /_test bleiben davon unberührt.
+	const path = url.pathname.replace(/^\/v1(?=\/|$)/, '');
 	state.requestLog.push({
 		method: req.method,
 		url: req.url,

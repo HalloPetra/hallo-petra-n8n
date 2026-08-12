@@ -29,11 +29,17 @@ export async function petraApiRequest(
 	qs?: IDataObject,
 ): Promise<IDataObject> {
 	const credentials = await this.getCredentials('petraApi');
-	const baseUrl = ((credentials.baseUrl as string) ?? '').replace(/\/+$/, '');
+	// The API version belongs to the contract this package implements, not to
+	// the user's configuration — a build speaks v1 or it does not work at all.
+	// A trailing `/v1` is tolerated anyway: earlier versions asked for it, and
+	// the resulting `/v1/v1` would be a 404 nobody enjoys tracking down.
+	const baseUrl = ((credentials.baseUrl as string) ?? '')
+		.replace(/\/+$/, '')
+		.replace(/\/v1$/, '');
 
 	const options: IHttpRequestOptions = {
 		method,
-		url: `${baseUrl}${endpoint}`,
+		url: `${baseUrl}/v1${endpoint}`,
 		headers: {
 			'User-Agent': USER_AGENT,
 			Accept: 'application/json',

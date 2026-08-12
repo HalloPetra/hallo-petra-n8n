@@ -29,8 +29,10 @@ export class PetraApi implements ICredentialType {
 			displayName: 'Base URL',
 			name: 'baseUrl',
 			type: 'string',
-			default: 'https://api.hallopetra.de/v1',
-			description: 'Base URL of the HalloPetra integration API. Only change this for testing.',
+			default: 'https://hallopetra-api.vercel.app',
+			placeholder: 'https://hallopetra-api.vercel.app',
+			description:
+				'Host of the HalloPetra API, without the version — the nodes add "/v1" themselves. Only change this to test against another environment.',
 		},
 	];
 
@@ -44,11 +46,13 @@ export class PetraApi implements ICredentialType {
 	};
 
 	// Listing webhooks is the cheapest call that proves the key works and reaches
-	// the endpoint every trigger in this package depends on.
+	// the endpoint every trigger in this package depends on. The base URL is
+	// normalised the same way the nodes do it, so a credential still carrying
+	// the old `/v1` suffix tests green instead of failing with a 404.
 	test: ICredentialTestRequest = {
 		request: {
-			baseURL: '={{$credentials.baseUrl}}',
-			url: '/webhooks',
+			baseURL: '={{ $credentials.baseUrl.replace(/\\/+$/, "").replace(/\\/v1$/, "") }}',
+			url: '/v1/webhooks',
 			qs: { limit: 1 },
 		},
 	};

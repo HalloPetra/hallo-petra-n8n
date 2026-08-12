@@ -55,7 +55,7 @@ Only the two synchronous events are answered, so only they offer the response pa
 ## Repository structure
 
 ```
-credentials/PetraApi.credentials.ts     # API key + base URL, credential test against /v1/webhooks
+credentials/PetraApi.credentials.ts     # API key + host (the nodes add /v1), credential test against /v1/webhooks
 nodes/shared/GenericFunctions.ts        # petraApiRequest (auth, user agent, error wrapping), Ablauf/form pickers
 nodes/shared/WebhookFunctions.ts        # subscription lifecycle + HMAC verification, shared by all four triggers
 nodes/shared/TriggerProperties.ts       # the parameters the triggers share (registration, response mode)

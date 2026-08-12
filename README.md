@@ -14,7 +14,7 @@ Everything runs on webhooks that the nodes register with HalloPetra by themselve
 
 1. In n8n, go to **Settings → Community Nodes → Install** and enter `@hallopetra/n8n-nodes-hallopetra`.
 2. In the HalloPetra app, create an API key for the integration (format `hp_ck_…`).
-3. In n8n, create a **Petra API** credential and paste the key. The default base URL is `https://api.hallopetra.de/v1`. Use **Test** to confirm the connection.
+3. In n8n, create a **Petra API** credential and paste the key. The default base URL is `https://hallopetra-api.vercel.app` — the host only, without a version; the nodes speak `/v1` themselves. Use **Test** to confirm the connection.
 4. Add a Petra trigger to a workflow, select the credential and publish the workflow — webhook registration happens automatically.
 
 ## Nodes
@@ -246,7 +246,7 @@ Petra Form Submission Trigger (every form)
 
 ## API contract
 
-Base URL `https://api.hallopetra.de/v1`. Every request sends `Authorization: Bearer <API key>` and the user agent `n8n-nodes-hallopetra/<version>`.
+Base URL `https://hallopetra-api.vercel.app`, to which the nodes append `/v1` — the endpoints below are relative to that. The version is part of the contract this package implements, not something to configure; a credential that still carries a trailing `/v1` from an earlier version keeps working, the nodes strip it. Every request sends `Authorization: Bearer <API key>` and the user agent `n8n-nodes-hallopetra/<version>`.
 
 | Endpoint | Purpose |
 | --- | --- |

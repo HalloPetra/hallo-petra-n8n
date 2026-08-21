@@ -311,7 +311,7 @@ export class PetraTrigger implements INodeType {
 				},
 				default: [],
 				description:
-					'The call flows this workflow reacts to. A call that ran any one of them starts it. The webhook also appears on each of these call flows in the HalloPetra app under "Nach dem Anruf". Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+					'The call flows this workflow reacts to. A call that ran any one of them starts it. The webhook also appears on each of these call flows in the HalloPetra app. Choose from the list, or specify IDs using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Form Names or IDs',

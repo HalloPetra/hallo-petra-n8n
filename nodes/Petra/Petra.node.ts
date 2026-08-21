@@ -217,8 +217,8 @@ export class Petra implements INodeType {
 				description:
 					'What Petra should say next, in plain language. Leave empty to hand her fields and instructions without a spoken announcement.',
 			},
-			fieldsCollection('fieldsKontakt', 'Persist Fields (Kontakt)', 'kontakt'),
-			fieldsCollection('fieldsProzess', 'Persist Fields (Prozess)', 'prozess'),
+			fieldsCollection('fieldsKontakt', 'Persist Fields (Contact)', 'kontakt'),
+			fieldsCollection('fieldsProzess', 'Persist Fields (Process)', 'prozess'),
 			{
 				displayName: 'Instructions',
 				name: 'instructions',

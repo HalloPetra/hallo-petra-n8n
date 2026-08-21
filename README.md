@@ -193,7 +193,7 @@ Answering a **Call Tool** trigger adds what Petra says next:
 
 - **Message** is spoken to the caller. Leave it empty to hand Petra fields and instructions without a spoken announcement — useful when the workflow only found background information.
 - **Instructions** is how Petra should handle this call, in plain language. It goes into her prompt, it is not spoken.
-- **Persist Fields (Kontakt / Prozess)** behaves differently from everything else here: those values do not go into the conversation. They tell HalloPetra to store them permanently — *Kontakt* for lasting facts about the caller, *Prozess* for what this particular request was about. Keys are canonicalised to snake_case, and unknown ones are created on the fly.
+- **Persist Fields (Contact / Process)** behaves differently from everything else here: those values do not go into the conversation. They tell HalloPetra to store them permanently — *Contact* (the `fields.kontakt` group) for lasting facts about the caller, *Process* (`fields.prozess`) for what this particular request was about. Keys are canonicalised to snake_case, and unknown ones are created on the fly.
 
 Expressions work in every field. **All sections are optional:** anything left empty is omitted from the response entirely. Replying is terminal — it marks the end of the synchronous part, and the node has no output in this mode. To run additional steps after responding (logging, for instance), branch off *before* this node; the response is sent the moment the node runs.
 
@@ -227,7 +227,7 @@ Both operations respect **Continue on Fail**: a failing item produces an item wi
 ```
 HalloPetra Trigger (Event: Call Incoming)
   → HTTP Request (query your CRM with {{ $json.data.calling_phone_number }})
-  → HalloPetra (Call → Reply, Respond To: Incoming Call — Kontakt fields from the CRM,
+  → HalloPetra (Call → Reply, Respond To: Incoming Call — contact fields from the CRM,
                 Instructions: "Regular customer, heating last serviced in March")
 ```
 

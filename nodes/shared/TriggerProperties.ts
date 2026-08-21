@@ -32,13 +32,18 @@ export const registrationProperty: INodeProperties = {
 /**
  * Response parameters for the two synchronous events. Only `call.incoming` and
  * `call.tool` are answered — HalloPetra waits for the reply and works with it.
- * Everything else is fire-and-forget, so those triggers do not offer these.
+ * Everything else is fire-and-forget, so these stay hidden for those events.
  */
 export const syncResponseProperties: INodeProperties[] = [
 	{
 		displayName: 'Respond',
 		name: 'responseMode',
 		type: 'options',
+		displayOptions: {
+			show: {
+				event: ['call.incoming', 'call.tool'],
+			},
+		},
 		options: [
 			{
 				name: 'Using Reply to Petra Node',
@@ -65,6 +70,7 @@ export const syncResponseProperties: INodeProperties[] = [
 		type: 'options',
 		displayOptions: {
 			show: {
+				event: ['call.incoming', 'call.tool'],
 				responseMode: ['lastNode'],
 			},
 		},

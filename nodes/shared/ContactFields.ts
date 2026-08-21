@@ -14,15 +14,15 @@ export const contactNameProperty: INodeProperties = {
 	type: 'string',
 	default: '',
 	required: true,
-	placeholder: 'Max Mustermann',
+	placeholder: 'Jane Doe',
 	description:
 		'The name HalloPetra lists and searches this contact by. For a person the full name, for a company its name. First and last name below are stored in addition, but the app does not build the name from them.',
 };
 
 /**
  * The contact attributes `POST /contacts` and `PATCH /contacts/{id}` accept.
- * Both endpoints take the same set, so both nodes show the same collection.
- * Options are alphabetical because the n8n linter requires it.
+ * Both endpoints take the same set, so both operations show the same
+ * collection. Options are alphabetical because the n8n linter requires it.
  */
 export const contactFieldsProperty: INodeProperties = {
 	displayName: 'Contact Fields',
@@ -36,7 +36,7 @@ export const contactFieldsProperty: INodeProperties = {
 			name: 'address',
 			type: 'string',
 			default: '',
-			description: 'Postal address, e.g. "Musterstraße 1, 12345 Musterstadt"',
+			description: 'Postal address, e.g. "123 Main Street, Springfield, IL 62701"',
 		},
 		{
 			displayName: 'Contact Group IDs',
@@ -71,29 +71,28 @@ export const contactFieldsProperty: INodeProperties = {
 			type: 'string',
 			default: '',
 			description:
-				'Full name, e.g. "Max Mustermann". Use this when you do not have first and last name separately.',
+				'Full name, e.g. "Jane Doe". Use this when you do not have first and last name separately.',
 		},
 		{
 			displayName: 'Phone',
 			name: 'phone',
 			type: 'string',
 			default: '',
-			description:
-				'Phone number, e.g. "+491234567890". German numbers may also be given as "0151…".',
+			description: 'Phone number in international format, e.g. "+491234567890"',
 		},
 		{
 			displayName: 'Salutation',
 			name: 'salutation',
 			type: 'string',
 			default: '',
-			description: 'Form of address, e.g. "Herr" or "Frau"',
+			description: 'Form of address, e.g. "Mr" or "Ms"',
 		},
 	],
 };
 
 /**
- * The same collection for the create node, where `name` is a required field of
- * its own and would otherwise be offered twice.
+ * The same collection for the create operation, where `name` is a required
+ * field of its own and would otherwise be offered twice.
  */
 export const contactFieldsWithoutNameProperty: INodeProperties = {
 	...contactFieldsProperty,
@@ -161,9 +160,9 @@ export function buildContactBody(context: IExecuteFunctions, itemIndex: number):
 		}
 	}
 
-	// The create node carries `name` outside the collection, the update node
-	// inside it. Reading both keeps one builder for both; the dedicated field
-	// wins, because it is the one the user was required to fill in.
+	// The create operation carries `name` outside the collection, the update
+	// operation inside it. Reading both keeps one builder for both; the
+	// dedicated field wins, because it is the one the user was required to fill in.
 	const separateName = context.getNodeParameter('name', itemIndex, '') as string;
 	if (typeof separateName === 'string' && separateName.trim()) {
 		body.name = separateName.trim();

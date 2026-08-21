@@ -1,7 +1,7 @@
 {
   "name": "@hallopetra/n8n-nodes-hallopetra",
-  "version": "2.0.1",
-  "description": "n8n community nodes for HalloPetra: webhooks before, during and after a call, form submissions, contacts and tasks",
+  "version": "3.0.0",
+  "description": "n8n community nodes for HalloPetra: webhooks before, during and after a call, form submissions and contacts",
   "license": "MIT",
   "homepage": "https://github.com/HalloPetra/hallo-petra-n8n",
   "repository": {
@@ -41,12 +41,7 @@
     ],
     "nodes": [
       "dist/nodes/PetraTrigger/PetraTrigger.node.js",
-      "dist/nodes/PetraInCallTrigger/PetraInCallTrigger.node.js",
-      "dist/nodes/PetraCallFinishedTrigger/PetraCallFinishedTrigger.node.js",
-      "dist/nodes/PetraFormTrigger/PetraFormTrigger.node.js",
-      "dist/nodes/PetraFinish/PetraFinish.node.js",
-      "dist/nodes/PetraContactCreate/PetraContactCreate.node.js",
-      "dist/nodes/PetraContactUpdate/PetraContactUpdate.node.js"
+      "dist/nodes/Petra/Petra.node.js"
     ]
   },
   "devDependencies": {

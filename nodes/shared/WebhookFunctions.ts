@@ -22,9 +22,9 @@ export interface PetraWebhookRegistration {
 	name: string;
 	description: string;
 	/**
-	 * Narrows an event to a subset, e.g. `ablauf_ids` for `call.finished`.
+	 * Narrows an event to a subset, e.g. `callFlowIds` for `call.finished`.
 	 * Omitted or empty means company-wide — except for `call.tool`, where the
-	 * API requires at least one Ablauf to attach the tool to.
+	 * API requires at least one call flow to attach the tool to.
 	 */
 	scope?: PetraWebhookScope;
 	/** `call.tool` only: the arguments Petra fills from the conversation. */
@@ -32,7 +32,7 @@ export interface PetraWebhookRegistration {
 }
 
 export interface PetraWebhookScope {
-	/** The field name the API expects, e.g. `ablauf_ids`. */
+	/** The field name the API expects, e.g. `callFlowIds` or `formIds`. */
 	field: string;
 	ids: string[];
 }

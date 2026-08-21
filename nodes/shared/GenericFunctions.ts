@@ -100,43 +100,55 @@ function errorEnvelope(error: unknown): PetraErrorEnvelope | undefined {
 }
 
 /**
- * The list endpoints wrap their rows in a named key (`{ ablaeufe: [...] }`).
- * Tolerating `items` and a bare array as well keeps a picker working if a newer
- * endpoint settles on a different wrapper.
+ * The list endpoints page their rows as `{ items, totalCount, nextCursor? }`.
+ * A picker has no place for "load more", so all pages are fetched — capped, in
+ * case a misbehaving server keeps handing out cursors.
  */
-function rows(response: IDataObject, key: string): IDataObject[] {
-	if (Array.isArray(response)) return response as IDataObject[];
-	const list = response[key] ?? response.items ?? [];
-	return Array.isArray(list) ? (list as IDataObject[]) : [];
+async function loadPagedOptions(
+	context: ILoadOptionsFunctions,
+	endpoint: string,
+	disabledHint: string,
+): Promise<INodePropertyOptions[]> {
+	const options: INodePropertyOptions[] = [];
+	let cursor: string | undefined;
+	let pages = 0;
+	do {
+		const response = await petraApiRequest.call(context, 'GET', endpoint, undefined, {
+			limit: 100,
+			...(cursor ? { cursor } : {}),
+		});
+		const items = Array.isArray(response.items) ? (response.items as IDataObject[]) : [];
+		for (const item of items) {
+			options.push({
+				name: (item.name as string) || (item.id as string),
+				value: item.id as string,
+				description: item.status === 'disabled' ? disabledHint : undefined,
+			});
+		}
+		cursor = response.nextCursor as string | undefined;
+	} while (cursor && ++pages < 50);
+	return options;
 }
 
 /**
- * The company's Abläufe — where a `call.tool` attaches itself, and what a
+ * The company's call flows — where a `call.tool` attaches itself, and what a
  * `call.finished` webhook can be scoped to. Disabled ones stay listed: the API
  * accepts them, and the webhook starts firing as soon as the operator
- * re-enables the Ablauf.
+ * re-enables the flow.
  */
-export async function loadAblaeufe(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-	const response = await petraApiRequest.call(this, 'GET', '/ablaeufe');
-	return rows(response, 'ablaeufe').map((ablauf) => ({
-		name: (ablauf.title as string) || (ablauf.id as string),
-		value: ablauf.id as string,
-		description:
-			ablauf.status === 'disabled'
-				? 'Currently disabled — this webhook starts firing once the Ablauf is switched back on'
-				: undefined,
-	}));
+export async function loadCallFlows(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	return await loadPagedOptions(
+		this,
+		'/call-flows',
+		'Currently disabled — this webhook starts firing once the call flow is switched back on',
+	);
 }
 
 /** The company's forms, for scoping a `form.submitted` webhook. */
-export async function loadFormulare(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-	const response = await petraApiRequest.call(this, 'GET', '/formulare');
-	return rows(response, 'formulare').map((formular) => ({
-		name: (formular.title as string) || (formular.id as string),
-		value: formular.id as string,
-		description:
-			formular.status === 'disabled'
-				? 'Currently inactive — this webhook starts firing once the form is switched back on'
-				: undefined,
-	}));
+export async function loadForms(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+	return await loadPagedOptions(
+		this,
+		'/forms',
+		'Currently inactive — this webhook starts firing once the form is switched back on',
+	);
 }

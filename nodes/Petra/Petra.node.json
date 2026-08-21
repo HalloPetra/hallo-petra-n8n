@@ -1,5 +1,5 @@
 {
-	"node": "@hallopetra/n8n-nodes-hallopetra.petraFormTrigger",
+	"node": "@hallopetra/n8n-nodes-hallopetra.petra",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["Communication"],

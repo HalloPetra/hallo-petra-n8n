@@ -13,61 +13,56 @@ HalloPetra is **the digital office worker** ("digitale Bürokraft"), never an AI
 | n8n (this package) | Make (`hallo-petra-make`) | Zapier (`zapier-petra`) |
 | --- | --- | --- |
 | Credential **Petra API** | Connection **HalloPetra** (`petra`) | Auth with `apiKey` + `baseUrl` |
-| **Petra Incoming Call Trigger** — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **"Vor einem Anruf"** (`watch-hooks`) — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
-| **Petra In-Call Trigger** — registers `call.tool`, which *defines* the tool | **"Während eines Anrufs"** (`watch-call-hooks`) | — |
-| **Reply to Petra** — structured response node, one selector for both synchronous phases | Responder **"Antwort an Petra"** (`respond`) — same `respondTo` selector | not portable to Zapier |
-| **Petra Call Finished Trigger** — registers `call.finished`, optionally scoped to Abläufe | **"Nach einem Anruf"** | — |
-| **Petra Form Submission Trigger** — registers `form.submitted`, optionally scoped to forms | — | — |
-| **Create / Update Petra Contact** | **"Kontakt anlegen"**, **"Kontakt aktualisieren"** | — |
-| Ablauf and form pickers (`GET /ablaeufe`, `GET /formulare`) | RPCs `getWebhookTypes` / `getEventTypes` | `event_type_list` trigger |
+| **HalloPetra Trigger**, Event *Call Incoming* — registers on publish, deregisters on unpublish | Webhook `petra-hook` + **"Vor einem Anruf"** (`watch-hooks`) — registers when the user creates the webhook in the dialog | REST hook `subscribe`/`unsubscribe` |
+| **HalloPetra Trigger**, Event *Call Tool* — registers `call.tool`, which *defines* the tool | **"Während eines Anrufs"** (`watch-call-hooks`) | — |
+| **HalloPetra** node, Call → Reply — structured response, one selector for both synchronous phases | Responder **"Antwort an Petra"** (`respond`) — same `respondTo` selector | not portable to Zapier |
+| **HalloPetra Trigger**, Event *Call Finished* — registers `call.finished`, optionally scoped to call flows | **"Nach einem Anruf"** | — |
+| **HalloPetra Trigger**, Event *Form Submitted* — registers `form.submitted`, optionally scoped to forms | — | — |
+| **HalloPetra** node, Contact → Create / Update | **"Kontakt anlegen"**, **"Kontakt aktualisieren"** | — |
+| Call flow and form pickers (`GET /call-flows`, `GET /forms`) | RPCs `getWebhookTypes` / `getEventTypes` | `event_type_list` trigger |
 | — | Universal module **"Eigener API-Aufruf"** (`make-api-call`) — required by Make's review checklist | — |
 
 Signature verification is the notable difference: n8n exposes the raw request body, so this package actually verifies `X-HalloPetra-Signature`. Make cannot (no raw-body access) and relies on the unguessable webhook URL instead.
 
 ## Architecture decisions
 
-**Own Finish node instead of n8n's "Respond to Webhook".** The built-in node throws from version 1.1 onwards unless one of its hardcoded trigger types (Webhook, Form, Chat, Wait) is among its parents — community triggers are not accepted. The underlying mechanism (`responseMode: 'responseNode'` plus `sendResponse()`) is generic, so `PetraFinish` implements it directly.
+**Own reply operation instead of n8n's "Respond to Webhook".** The built-in node throws from version 1.1 onwards unless one of its hardcoded trigger types (Webhook, Form, Chat, Wait) is among its parents — community triggers are not accepted. The underlying mechanism (`responseMode: 'responseNode'` plus `sendResponse()`) is generic, so the HalloPetra node's Call → Reply operation implements it directly.
 
 **Everything is a webhook; there is no polling.** An earlier version had a polling trigger on an event feed, plus a retry node that asked the API to redeliver — the feed endpoint no longer exists, and with it the whole apparatus went: the cursor in workflow static data, the Fibonacci backoff, the failure report. This removed the package's only piece of client-side state and its only component that could not work in queue mode. The trade is real and belongs in the docs: HalloPetra does not retry a delivery, so a workflow that throws on an asynchronous event loses it. That is a deliberate best-effort design, not an oversight.
 
 **Icons are raster images embedded in SVG.** The HalloPetra logo is a 3D illustration with no vector original, but the n8n linter rejects PNG icons (`node-class-description-icon-not-svg`) and a passing linter is required for verification. The icons are therefore 320 px WebP images base64-embedded in an SVG wrapper (~26 kB each). 320 px covers the worst case: n8n renders icons at up to 40 px, the canvas zooms 2×, and displays add another 2–3×. The linter also rejects identical light and dark files, so the dark variant adds a light rounded backdrop — which genuinely helps, since the blonde hair and blue jacket would otherwise blend into a dark UI.
 
-**`PetraFinish` is a terminal node.** It has no outputs: once it runs, the HTTP response is gone. Work that should happen afterwards belongs on a branch taken *before* it.
+**Replying is terminal.** With Resource *Call* the node's `outputs` expression resolves to `[]`: once it runs, the HTTP response is gone. Work that should happen afterwards belongs on a branch taken *before* it. The contact operations resolve to a normal main output.
 
-**One trigger node per event, no event dropdown.** The four triggers each register a fixed `event`. A dropdown would list four values that need entirely different nodes anyway — different envelopes, different response contracts, different scoping — and the value it produced would be a parameter no user could meaningfully change. The differences are worth spelling out, because they are the reason the split is not arbitrary:
+**One trigger with an event dropdown, one action node with resource/operation.** Until 2.x each event and each action was its own node — seven in total. n8n's verification caps a package at one regular node plus one trigger, so 3.0.0 merges them: the trigger carries an `event` dropdown whose choice gates the event-specific fields via `displayOptions`, and the action node follows the Notion/HubSpot resource/operation pattern. The events still differ substantially, which is why the field sets are disjoint rather than shared:
 
 | | `call.incoming` | `call.tool` | `call.finished` | `form.submitted` |
 | --- | --- | --- | --- | --- |
 | Envelope | flat, under `data` | nested under `body` | flat, under `data` | flat, under `data` |
 | Response | `fields` + `instructions` | adds `message` | none | none |
 | Budget | 2.5 s hard | 10 s | — | — |
-| Scoping | — | `ablauf_ids`, required | `ablauf_ids`, optional | `formular_ids`, optional |
+| Scoping | — | `callFlowIds`, required | `callFlowIds`, optional | `formIds`, optional |
 | Registration | label only | *defines the tool* | label only | label only |
 
-Only the two synchronous events are answered, so only they offer the response parameters and appear in `PetraFinish`'s `respondTo` selector — the same choice the Make app makes in its responder, and the reason both are named in its parent check. The two asynchronous ones pin `responseMode: 'onReceived'` with `responseData: 'noData'`: without an explicit `responseData`, n8n defaults it to `firstEntryJson` and writes that literal string as the response body.
+Only the two synchronous events are answered, so only they show the response parameters and appear in the reply operation's `respondTo` selector — the same choice the Make app makes in its responder. For the two asynchronous events the trigger's `responseMode`/`responseData` expressions resolve to `onReceived`/`noData`: without an explicit `responseData`, n8n defaults it to `firstEntryJson` and writes that literal string as the response body.
 
-**Scoping is a registration property, not a filter.** `ablauf_ids` and `formular_ids` go into `POST /webhooks`, so HalloPetra only delivers what the workflow asked for — no wasted executions, and the registration shows up on each Ablauf in the operator's dashboard. Neither is patchable, so `checkPetraWebhook` compares the selection order-insensitively and re-registers on any change. An empty selection means company-wide and the field is omitted entirely; the API rejects an empty array.
+**Scoping is a registration property, not a filter.** `callFlowIds` and `formIds` go into `POST /webhooks`, so HalloPetra only delivers what the workflow asked for — no wasted executions, and the registration shows up on each call flow in the operator's dashboard. Neither is patchable, so `checkPetraWebhook` compares the selection order-insensitively and re-registers on any change. An empty selection means company-wide and the field is omitted entirely; the API rejects an empty array.
 
-**Registering `call.tool` creates the tool, so that node carries the tool's definition.** For the other three events `name` and `description` are a dashboard label and the nodes derive them from the workflow. For `call.tool` they are what Petra calls the workflow by and what she reads to decide when to use it, `ablauf_ids` is required because a tool needs somewhere to appear, and `parameters` declares the arguments she collects from the caller. Everything but the URL is immutable server-side, so the whole definition takes part in the drift comparison. The API would answer a missing name or an empty Ablauf selection with a plain 400, so the node checks both up front and names the field — except in manual mode, where none of it is sent and demanding it would be nonsense.
+**Registering `call.tool` creates the tool, so that event carries the tool's definition.** For the other three events `name` and `description` are a dashboard label and the trigger derives them from the workflow. For `call.tool` they are what Petra calls the workflow by and what she reads to decide when to use it, `callFlowIds` is required because a tool needs somewhere to appear, and `parameters` declares the arguments she collects from the caller. Everything but the URL is immutable server-side, so the whole definition takes part in the drift comparison. The API would answer a missing name or an empty call flow selection with a plain 400, so the trigger checks both up front and names the field — except in manual mode, where none of it is sent and demanding it would be nonsense.
 
-**Shared code lives in `nodes/shared/`.** `WebhookFunctions.ts` holds the whole subscription lifecycle plus HMAC checking — identical for all four triggers, only the registration body differs. `TriggerProperties.ts` holds the parameters they share, because the wording is part of the contract with the user and four copies drift. Each node keeps its literal `webhookMethods` structure, which the linter reads.
+**Shared code lives in `nodes/shared/`.** `WebhookFunctions.ts` holds the whole subscription lifecycle plus HMAC checking — identical for all four events, only the registration body differs (a `switch` in the trigger's `registration()`). `TriggerProperties.ts` holds the registration and response-mode parameters, kept out of the node file because the wording is part of the contract with the user.
 
 ## Repository structure
 
 ```
 credentials/PetraApi.credentials.ts     # API key + host (the nodes add /v1), credential test against /v1/webhooks
-nodes/shared/GenericFunctions.ts        # petraApiRequest (auth, user agent, error wrapping), Ablauf/form pickers
-nodes/shared/WebhookFunctions.ts        # subscription lifecycle + HMAC verification, shared by all four triggers
-nodes/shared/TriggerProperties.ts       # the parameters the triggers share (registration, response mode)
-nodes/shared/ContactFields.ts           # the contact attributes both contact nodes offer, and the body builder
-nodes/PetraTrigger/                     # call.incoming: before Petra answers
-nodes/PetraInCallTrigger/               # call.tool: defines a tool Petra reaches for mid-conversation
-nodes/PetraCallFinishedTrigger/         # call.finished: after the call, scopable to Abläufe
-nodes/PetraFormTrigger/                 # form.submitted: a submitted form, scopable to forms
-nodes/PetraFinish/                      # synchronous response for either call phase
-nodes/PetraContactCreate/               # POST /contacts
-nodes/PetraContactUpdate/               # PATCH /contacts/{id}
-test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, Abläufe, forms, contacts)
+nodes/shared/GenericFunctions.ts        # petraApiRequest (auth, user agent, error wrapping), call flow/form pickers
+nodes/shared/WebhookFunctions.ts        # subscription lifecycle + HMAC verification, shared by all four events
+nodes/shared/TriggerProperties.ts       # the trigger parameters kept out of the node file (registration, response mode)
+nodes/shared/ContactFields.ts           # the contact attributes both contact operations offer, and the body builder
+nodes/PetraTrigger/                     # HalloPetra Trigger: all four events behind one event dropdown
+nodes/Petra/                            # HalloPetra action node: call.reply, contact.create, contact.update
+test/mock-petra-api.js                  # mock of the HalloPetra API (webhooks, call flows, forms, contacts)
 test/e2e-test.js                        # end-to-end test against n8n in Docker, one run
 .github/workflows/publish.yml           # npm publish with provenance, triggered by version tags
 .github/workflows/ci.yml                # lint + build on push and PR
@@ -113,15 +108,11 @@ Requirements n8n applies to verified community nodes, and where this package sta
 - `npx @n8n/scan-community-package @hallopetra/n8n-nodes-hallopetra` passes — met, all security checks green
 - `repository` in `package.json` matches the GitHub repository, case-sensitively — met
 
-One known risk: the guidelines say a package should integrate exactly one third-party service, with a trigger node allowed alongside the main node. This package ships seven nodes. They all serve HalloPetra, and they fall into three groups worth naming explicitly in the submission:
-
-- **Two synchronous triggers and their shared responder.** `PetraTrigger` and `PetraInCallTrigger` cover the two moments HalloPetra calls out and waits, and `PetraFinish` is the only way to answer either — a synchronous webhook is useless without a way to respond. The three are functionally one unit.
-- **Two asynchronous triggers.** `PetraCallFinishedTrigger` and `PetraFormTrigger` are the fire-and-forget half: one event each, no response, an optional scope. They are separate nodes because their payloads and their scoping sources have nothing in common.
-- **Two action nodes.** Create contact and update contact — the plain CRUD half of the same API, cut the way the Make app cuts it so users of both integrations look for the same thing.
+- At most one regular node plus one trigger per package — met since 3.0.0, which merged the seven nodes of 2.x into `Petra` (resource/operation) and `PetraTrigger` (event dropdown) after n8n flagged the count in review.
 
 ## Open points
 
-- **`content` is missing from `PetraFinish`, and someone wanted it.** The spec describes the `call.incoming` response as `contact` / `other_data` / `content` / `fields` and never mentions `instructions`; the implemented contract (`fields` + `instructions`, plus `message` for `call.tool`) was confirmed against the backend on 11 August 2026 and demonstrably works. But a real workflow was found trying to smuggle a `content` key into `instructions` by escaping out of the JSON, which means the field is wanted for appending free text to Petra's prompt. Whether `instructions` and `content` do the same thing on the `call.incoming` path is unconfirmed. Add `content` when that is answered — do not remove `instructions` on the strength of the prose alone.
+- **`content` is missing from the reply operation, and someone wanted it.** The spec describes the `call.incoming` response as `contact` / `other_data` / `content` / `fields` and never mentions `instructions`; the implemented contract (`fields` + `instructions`, plus `message` for `call.tool`) was confirmed against the backend on 11 August 2026 and demonstrably works. But a real workflow was found trying to smuggle a `content` key into `instructions` by escaping out of the JSON, which means the field is wanted for appending free text to Petra's prompt. Whether `instructions` and `content` do the same thing on the `call.incoming` path is unconfirmed. Add `content` when that is answered — do not remove `instructions` on the strength of the prose alone.
 - **A failed registration takes the endpoint down with it.** n8n rolls back the whole activation when a `create` hook throws, so an unreachable API means the trigger's HTTP endpoint disappears too — even though HalloPetra still holds a valid registration and keeps delivering to it. Happened in practice on 12 August 2026 (wrong base URL) and looks, from the outside, exactly like "the webhook no longer exists". A `checkExists` that treats a connection or server error as "assume the stored registration is still good" would keep the endpoint alive; a genuine 404 should still fail loudly.
 - **Nothing cleans up orphaned registrations.** `checkPetraWebhook` forgets the stored webhook id whenever verifying it fails for any reason, and `deletePetraWebhook` drops it even when the `DELETE` did not go through. Both leave a registration behind that HalloPetra keeps delivering to, so a call arrives twice and the workflow runs twice — observed in the wild. `test/webhook-doctor.js` finds and removes them by hand. The durable fix is to look the endpoint up by URL (`GET /v1/webhooks?url=…`) before registering and clear out what is already there; that cannot hit a hand-made registration, because the URL carries a workflow-specific UUID.
 - On the LiveKit path a `call.tool` delivery can arrive unsigned, because the webhook is resolved through a view that omits the secret. `receivePetraWebhook` verifies only when a secret is known locally, so this degrades to an unverified delivery rather than a 401 — but a webhook registered through the API does return a secret, so the trigger will start rejecting those deliveries once it has one. Worth confirming against the real API.

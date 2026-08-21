@@ -11,29 +11,29 @@ const API_KEY = 'test-key';
 // lehnt POST /webhooks mit 400 ab.
 const EVENTS = {
 	'call.incoming': { sync: true },
-	// Die Registrierung definiert hier das Werkzeug selbst: Name und Abläufe sind
-	// Pflicht, `parameters` deklariert, was Petra beim Anrufer erfragt.
-	'call.tool': { sync: true, scopeField: 'ablauf_ids', scopeRequired: true, definesTool: true },
+	// Die Registrierung definiert hier das Werkzeug selbst: Name und Call-Flows
+	// sind Pflicht, `parameters` deklariert, was Petra beim Anrufer erfragt.
+	'call.tool': { sync: true, scopeField: 'callFlowIds', scopeRequired: true, definesTool: true },
 	// Die asynchronen Ereignisse lassen sich optional eingrenzen.
-	'call.finished': { sync: false, scopeField: 'ablauf_ids' },
-	'form.submitted': { sync: false, scopeField: 'formular_ids' },
+	'call.finished': { sync: false, scopeField: 'callFlowIds' },
+	'form.submitted': { sync: false, scopeField: 'formIds' },
 };
-const SCOPE_FIELDS = ['ablauf_ids', 'formular_ids'];
+const SCOPE_FIELDS = ['callFlowIds', 'formIds'];
 
 // Feste IDs, damit der E2E-Test gezielt auswählen kann
-const ABLAEUFE = [
-	{ id: '0c4f8a6e-2b91-4d37-8e5a-6f1d3c7b9a02', title: 'Notdienst-Anfrage aufnehmen', status: 'enabled' },
-	{ id: '1d5e9b7f-3ca2-4e48-9f6b-7a2e4d8c0b13', title: 'Termin vereinbaren', status: 'enabled' },
-	{ id: '2e6fac80-4db3-4f59-a07c-8b3f5e9d1c24', title: 'Alter Ablauf', status: 'disabled' },
+const CALL_FLOWS = [
+	{ id: '0c4f8a6e-2b91-4d37-8e5a-6f1d3c7b9a02', name: 'Notdienst-Anfrage aufnehmen', status: 'enabled' },
+	{ id: '1d5e9b7f-3ca2-4e48-9f6b-7a2e4d8c0b13', name: 'Termin vereinbaren', status: 'enabled' },
+	{ id: '2e6fac80-4db3-4f59-a07c-8b3f5e9d1c24', name: 'Alter Ablauf', status: 'disabled' },
 ];
-const FORMULARE = [
-	{ id: '3f70bd91-5ec4-4a6a-b18d-9c4a6f0e2d35', title: 'Rückrufbitte', status: 'enabled' },
-	{ id: '4a81cea2-6fd5-4b7b-c29e-0d5b7a1f3e46', title: 'Schadensmeldung', status: 'enabled' },
+const FORMS = [
+	{ id: '3f70bd91-5ec4-4a6a-b18d-9c4a6f0e2d35', name: 'Rückrufbitte', status: 'enabled' },
+	{ id: '4a81cea2-6fd5-4b7b-c29e-0d5b7a1f3e46', name: 'Schadensmeldung', status: 'enabled' },
 ];
-const IDS_BY_SCOPE_FIELD = { ablauf_ids: ABLAEUFE, formular_ids: FORMULARE };
+const IDS_BY_SCOPE_FIELD = { callFlowIds: CALL_FLOWS, formIds: FORMS };
 
 const state = {
-	webhooks: {}, // id -> { id, event, url, name, description, ablauf_ids?, formular_ids?, parameters?, secret, createdAt }
+	webhooks: {}, // id -> { id, event, url, name, description, callFlowIds?, formIds?, parameters?, secret, createdAt }
 	contacts: {}, // id -> Kontakt laut POST /contacts
 	// /tasks fehlt bewusst: kein Node im Paket legt noch Aufgaben an.
 	requestLog: [], // { method, url, userAgent, time }
@@ -143,7 +143,7 @@ function samplePayload(event) {
 				},
 				email_send_to: null,
 				forwarded_to: null,
-				main_task_id: ABLAEUFE[0].id,
+				main_task_id: CALL_FLOWS[0].id,
 				previous_webhook_calls: [],
 				fields: { kontakt: { customer_number: 'K-4711' }, prozess: {}, projekt: {} },
 			},
@@ -154,7 +154,7 @@ function samplePayload(event) {
 			webhook_id: 'wh_test',
 			event,
 			data: {
-				form: { id: FORMULARE[0].id, title: FORMULARE[0].title, slug: 'rueckrufbitte' },
+				form: { id: FORMS[0].id, title: FORMS[0].name, slug: 'rueckrufbitte' },
 				submission: {
 					submitted_at: now,
 					data: { name: 'Max Mustermann', anliegen: 'Bitte um Rückruf' },
@@ -246,12 +246,21 @@ const server = http.createServer(async (req, res) => {
 		return json(res, 401, { message: 'Unauthorized' });
 	}
 
-	// Auswahlquellen für die Eingrenzung der asynchronen Trigger
-	if (path === '/ablaeufe' && req.method === 'GET') {
-		return json(res, 200, { ablaeufe: ABLAEUFE });
+	// Auswahlquellen für die Eingrenzung — cursor-paginiert wie die echte API:
+	// { items, totalCount, nextCursor? }, `cursor` ist der Index der nächsten Zeile.
+	function pagedList(rows) {
+		const limit = Math.min(Number(url.searchParams.get('limit')) || 100, 100);
+		const offset = Number(url.searchParams.get('cursor')) || 0;
+		const items = rows.slice(offset, offset + limit);
+		const body = { items, totalCount: rows.length };
+		if (offset + limit < rows.length) body.nextCursor = String(offset + limit);
+		return json(res, 200, body);
 	}
-	if (path === '/formulare' && req.method === 'GET') {
-		return json(res, 200, { formulare: FORMULARE });
+	if (path === '/call-flows' && req.method === 'GET') {
+		return pagedList(CALL_FLOWS);
+	}
+	if (path === '/forms' && req.method === 'GET') {
+		return pagedList(FORMS);
 	}
 
 	if (path === '/webhooks' && req.method === 'POST') {
@@ -291,7 +300,7 @@ const server = http.createServer(async (req, res) => {
 				return apiError(res, 'VALIDATION_ERROR', `Unknown ${field}: ${unknown.join(', ')}`);
 			}
 		}
-		// call.tool ist das einzige Ereignis mit Pflicht-Eingrenzung: ohne Ablauf
+		// call.tool ist das einzige Ereignis mit Pflicht-Eingrenzung: ohne Call-Flow
 		// gäbe es keine Stelle, an der Petra das Werkzeug anbieten könnte.
 		if (definition.scopeRequired && !body[definition.scopeField]?.length) {
 			return apiError(
@@ -328,8 +337,8 @@ const server = http.createServer(async (req, res) => {
 			url: body.url,
 			name: body.name,
 			description: body.description,
-			ablauf_ids: body.ablauf_ids,
-			formular_ids: body.formular_ids,
+			callFlowIds: body.callFlowIds,
+			formIds: body.formIds,
 			parameters: body.parameters,
 			secret,
 			createdAt: new Date().toISOString(),

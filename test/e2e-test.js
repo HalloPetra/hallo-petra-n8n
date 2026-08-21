@@ -2,10 +2,11 @@
 //
 //   node e2e-test.js run
 //
-// Alles ist webhook-basiert, also läuft der Test in einem Stück: vier Trigger
-// registrieren sich, bekommen je eine signierte Zustellung, und die beiden
-// synchronen antworten. Die asynchronen legen eine Aufgabe an — daran ist ohne
-// Blick in die n8n-Executions ablesbar, dass die Zustellung ankam.
+// Alles ist webhook-basiert, also läuft der Test in einem Stück: der Trigger
+// registriert sich viermal (einmal je Event), bekommt je eine signierte
+// Zustellung, und die beiden synchronen Events antworten. Die asynchronen
+// legen einen Kontakt an — daran ist ohne Blick in die n8n-Executions
+// ablesbar, dass die Zustellung ankam.
 const fs = require('fs');
 const crypto = require('crypto');
 
@@ -18,9 +19,12 @@ const MOCK = process.env.MOCK_URL ?? 'http://localhost:7788';
 const MOCK_FROM_N8N = process.env.MOCK_URL_FROM_N8N ?? 'http://host.docker.internal:7788';
 const STATE_FILE = process.env.E2E_STATE ?? __dirname + '/e2e-state.json';
 
-// Zwei der drei Abläufe aus dem Mock — die dritte Auswahl bleibt bewusst außen vor,
+// Zwei der drei Call-Flows aus dem Mock — der dritte bleibt bewusst außen vor,
 // damit die Eingrenzung nachweislich nicht "alles" bedeutet.
-const ABLAUF_IDS = ['0c4f8a6e-2b91-4d37-8e5a-6f1d3c7b9a02', '1d5e9b7f-3ca2-4e48-9f6b-7a2e4d8c0b13'];
+const CALL_FLOW_IDS = [
+	'0c4f8a6e-2b91-4d37-8e5a-6f1d3c7b9a02',
+	'1d5e9b7f-3ca2-4e48-9f6b-7a2e4d8c0b13',
+];
 
 const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) : {};
 const saveState = () => fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
@@ -187,15 +191,10 @@ async function run() {
 		.filter((t) => t.name.toLowerCase().includes('petra') && !t.name.endsWith('Tool'))
 		.map((t) => t.name);
 	console.log('Gefundene Petra-Node-Typen:', petraTypes);
-	check('Alle 7 Nodes geladen', petraTypes.length === 7, petraTypes.join(', '));
+	check('Beide Nodes geladen', petraTypes.length === 2, petraTypes.join(', '));
 	const nodeType = (suffix) => petraTypes.find((n) => n.endsWith(`.${suffix}`));
-	const incomingType = nodeType('petraTrigger');
-	const inCallType = nodeType('petraInCallTrigger');
-	const finishedType = nodeType('petraCallFinishedTrigger');
-	const formType = nodeType('petraFormTrigger');
-	const finishType = nodeType('petraFinish');
-	const contactCreateType = nodeType('petraContactCreate');
-	const contactUpdateType = nodeType('petraContactUpdate');
+	const triggerType = nodeType('petraTrigger');
+	const actionType = nodeType('petra');
 
 	// ---------------------------------------------------------------- Credential
 	if (!state.credentialId) {
@@ -213,14 +212,19 @@ async function run() {
 	await ensureWorkflow('workflowAId', {
 		name: 'E2E Incoming Call',
 		nodes: [
-			triggerNode('Petra Incoming Call Trigger', incomingType, { responseMode: 'responseNode' }),
+			triggerNode('HalloPetra Trigger', triggerType, {
+				event: 'call.incoming',
+				responseMode: 'responseNode',
+			}),
 			{
 				id: crypto.randomUUID(),
 				name: 'Reply to Petra',
-				type: finishType,
+				type: actionType,
 				typeVersion: 1,
 				position: [300, 0],
 				parameters: {
+					resource: 'call',
+					operation: 'reply',
 					respondTo: 'call.incoming',
 					fieldsKontakt: {
 						values: [{ key: 'customer_number', value: '=K-{{ $json.data.call_id }}' }],
@@ -231,7 +235,7 @@ async function run() {
 			},
 		],
 		connections: {
-			'Petra Incoming Call Trigger': {
+			'HalloPetra Trigger': {
 				main: [[{ node: 'Reply to Petra', type: 'main', index: 0 }]],
 			},
 		},
@@ -243,12 +247,13 @@ async function run() {
 		name: 'E2E In-Call Tool',
 		nodes: [
 			// Die Registrierung ist zugleich die Werkzeugdefinition: Name, Anweisung,
-			// die Abläufe, an denen Petra es findet, und ihre Argumente.
-			triggerNode('Petra In-Call Trigger', inCallType, {
+			// die Call-Flows, an denen Petra es findet, und ihre Argumente.
+			triggerNode('HalloPetra Trigger', triggerType, {
+				event: 'call.tool',
 				responseMode: 'responseNode',
 				toolName: 'Auftragsstatus nachschlagen',
 				toolDescription: 'Schlägt den Status eines Auftrags nach, wenn der Anrufer danach fragt.',
-				ablaufIds: ABLAUF_IDS,
+				callFlowIds: CALL_FLOW_IDS,
 				parameters: {
 					values: [
 						{
@@ -262,10 +267,12 @@ async function run() {
 			{
 				id: crypto.randomUUID(),
 				name: 'Create Petra Contact',
-				type: contactCreateType,
+				type: actionType,
 				typeVersion: 1,
 				position: [220, 0],
 				parameters: {
+					resource: 'contact',
+					operation: 'create',
 					// Der Name ist ein eigenes Pflichtfeld, nicht Teil der Collection:
 					// ohne ihn legt die API zwar an, aber die HalloPetra-App zeigt
 					// den Kontakt nirgends.
@@ -287,10 +294,12 @@ async function run() {
 			{
 				id: crypto.randomUUID(),
 				name: 'Update Petra Contact',
-				type: contactUpdateType,
+				type: actionType,
 				typeVersion: 1,
 				position: [440, 0],
 				parameters: {
+					resource: 'contact',
+					operation: 'update',
 					contactId: '={{ $json.id }}',
 					contactFields: { email: 'max@mustermann.de' },
 				},
@@ -299,42 +308,46 @@ async function run() {
 			{
 				id: crypto.randomUUID(),
 				name: 'Reply to Petra',
-				type: finishType,
+				type: actionType,
 				typeVersion: 1,
 				position: [660, 0],
 				parameters: {
+					resource: 'call',
+					operation: 'reply',
 					respondTo: 'call.tool',
 					messageContent: 'Ihr Auftrag ist in Bearbeitung.',
-					messageType: 'SAY',
 					fieldsKontakt: { values: [{ key: 'customer_number', value: 'K-4711' }] },
 					instructions: 'Kunde ist Premiumkunde — biete den Express-Termin an.',
 				},
 			},
 		],
 		connections: {
-			'Petra In-Call Trigger': { main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]] },
+			'HalloPetra Trigger': { main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]] },
 			'Create Petra Contact': { main: [[{ node: 'Update Petra Contact', type: 'main', index: 0 }]] },
 			'Update Petra Contact': { main: [[{ node: 'Reply to Petra', type: 'main', index: 0 }]] },
 		},
 	});
 
-	// -------- C: nach dem Anruf, eingegrenzt auf zwei Abläufe, ohne Antwort
+	// -------- C: nach dem Anruf, eingegrenzt auf zwei Call-Flows, ohne Antwort
 	await ensureWorkflow('workflowCId', {
 		name: 'E2E Call Finished',
 		nodes: [
-			triggerNode('Petra Call Finished Trigger', finishedType, {
+			triggerNode('HalloPetra Trigger', triggerType, {
+				event: 'call.finished',
 				fires: 'selected',
-				ablaufIds: ABLAUF_IDS,
+				callFlowIds: CALL_FLOW_IDS,
 			}),
 			// Der angelegte Kontakt ist der Nachweis, dass die Zustellung ankam:
 			// asynchrone Ereignisse antworten nicht, also braucht es eine Spur.
 			{
 				id: crypto.randomUUID(),
 				name: 'Create Petra Contact',
-				type: contactCreateType,
+				type: actionType,
 				typeVersion: 1,
 				position: [300, 0],
 				parameters: {
+					resource: 'contact',
+					operation: 'create',
 					name: '=Nachbereitung: {{ $json.data.topic }}',
 					contactFields: { phone: '={{ $json.data.phone }}' },
 				},
@@ -342,7 +355,7 @@ async function run() {
 			},
 		],
 		connections: {
-			'Petra Call Finished Trigger': {
+			'HalloPetra Trigger': {
 				main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]],
 			},
 		},
@@ -352,14 +365,16 @@ async function run() {
 	await ensureWorkflow('workflowDId', {
 		name: 'E2E Form Submission',
 		nodes: [
-			triggerNode('Petra Form Submission Trigger', formType, { fires: 'all' }),
+			triggerNode('HalloPetra Trigger', triggerType, { event: 'form.submitted', fires: 'all' }),
 			{
 				id: crypto.randomUUID(),
 				name: 'Create Petra Contact',
-				type: contactCreateType,
+				type: actionType,
 				typeVersion: 1,
 				position: [300, 0],
 				parameters: {
+					resource: 'contact',
+					operation: 'create',
 					name: '=Formular: {{ $json.data.form.title }}',
 					contactFields: { email: '={{ $json.data.contact.email }}' },
 				},
@@ -367,7 +382,7 @@ async function run() {
 			},
 		],
 		connections: {
-			'Petra Form Submission Trigger': {
+			'HalloPetra Trigger': {
 				main: [[{ node: 'Create Petra Contact', type: 'main', index: 0 }]],
 			},
 		},
@@ -400,10 +415,10 @@ async function run() {
 		JSON.stringify({ name: registeredTool?.name, description: registeredTool?.description }),
 	);
 	check(
-		'call.tool hängt an genau den zwei gewählten Abläufen',
-		JSON.stringify([...(registeredTool?.ablauf_ids ?? [])].sort()) ===
-			JSON.stringify([...ABLAUF_IDS].sort()),
-		JSON.stringify(registeredTool?.ablauf_ids),
+		'call.tool hängt an genau den zwei gewählten Call-Flows',
+		JSON.stringify([...(registeredTool?.callFlowIds ?? [])].sort()) ===
+			JSON.stringify([...CALL_FLOW_IDS].sort()),
+		JSON.stringify(registeredTool?.callFlowIds),
 	);
 	check(
 		'call.tool deklariert das Argument, das Petra beim Anrufer erfragt',
@@ -413,16 +428,15 @@ async function run() {
 		JSON.stringify(registeredTool?.parameters),
 	);
 	check(
-		'call.finished ist auf genau die zwei gewählten Abläufe eingegrenzt',
-		JSON.stringify([...(byEvent['call.finished']?.ablauf_ids ?? [])].sort()) ===
-			JSON.stringify([...ABLAUF_IDS].sort()),
-		JSON.stringify(byEvent['call.finished']?.ablauf_ids),
+		'call.finished ist auf genau die zwei gewählten Call-Flows eingegrenzt',
+		JSON.stringify([...(byEvent['call.finished']?.callFlowIds ?? [])].sort()) ===
+			JSON.stringify([...CALL_FLOW_IDS].sort()),
+		JSON.stringify(byEvent['call.finished']?.callFlowIds),
 	);
 	check(
 		'form.submitted ist unternehmensweit registriert (keine Eingrenzung)',
-		byEvent['form.submitted'] !== undefined &&
-			byEvent['form.submitted'].formular_ids === undefined,
-		JSON.stringify(byEvent['form.submitted']?.formular_ids ?? null),
+		byEvent['form.submitted'] !== undefined && byEvent['form.submitted'].formIds === undefined,
+		JSON.stringify(byEvent['form.submitted']?.formIds ?? null),
 	);
 	const userAgents = [...new Set((await mock('GET', '/_test/state')).requestLog.map((r) => r.userAgent))];
 	check(
@@ -465,8 +479,7 @@ async function run() {
 	check('call.tool: Status 200', tool.status === 200, `status=${tool.status}`);
 	check(
 		'call.tool: Antwort trägt message, fields und instructions',
-		toolBody.message?.content === 'Ihr Auftrag ist in Bearbeitung.' &&
-			toolBody.message?.message_type === 'SAY' &&
+		toolBody.message === 'Ihr Auftrag ist in Bearbeitung.' &&
 			toolBody.fields?.kontakt?.customer_number === 'K-4711' &&
 			toolBody.instructions?.startsWith('Kunde ist Premiumkunde'),
 		tool.body,
@@ -520,9 +533,11 @@ async function run() {
 	// Auswahl ändern -> alte Registrierung verwerfen, neu registrieren.
 	const workflowC = await getWorkflow(state.workflowCId);
 	await deactivateWorkflow(state.workflowCId);
+	// Der Trigger-Typ allein reicht nicht mehr — im Workflow steht nur einer,
+	// aber sicherheitshalber zusätzlich am Event festmachen.
 	const patched = workflowC.nodes.map((node) =>
-		node.type === finishedType
-			? { ...node, parameters: { ...node.parameters, ablaufIds: [ABLAUF_IDS[0]] } }
+		node.type === triggerType && node.parameters.event === 'call.finished'
+			? { ...node, parameters: { ...node.parameters, callFlowIds: [CALL_FLOW_IDS[0]] } }
 			: node,
 	);
 	const current = await getWorkflow(state.workflowCId);
@@ -536,9 +551,10 @@ async function run() {
 		(w) => w.event === 'call.finished',
 	);
 	check(
-		'Geänderte Ablauf-Auswahl registriert neu (genau eine Registrierung, ein Ablauf)',
-		afterDrift.length === 1 && JSON.stringify(afterDrift[0].ablauf_ids) === JSON.stringify([ABLAUF_IDS[0]]),
-		JSON.stringify(afterDrift.map((w) => w.ablauf_ids)),
+		'Geänderte Call-Flow-Auswahl registriert neu (genau eine Registrierung, ein Call-Flow)',
+		afterDrift.length === 1 &&
+			JSON.stringify(afterDrift[0].callFlowIds) === JSON.stringify([CALL_FLOW_IDS[0]]),
+		JSON.stringify(afterDrift.map((w) => w.callFlowIds)),
 	);
 
 	// Abmelden beim Deaktivieren
